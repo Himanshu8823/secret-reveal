@@ -1,6 +1,8 @@
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { EmptyState } from '../../src/components/EmptyState';
+import { Fab } from '../../src/components/Fab';
 import { Text } from '../../src/components/ui';
 
 /**
@@ -8,6 +10,9 @@ import { Text } from '../../src/components/ui';
  * this tab will become an "all groups / discover / search" surface in a
  * later phase. For now it mirrors Home's intent: "no separate groups list
  * yet, but the tab exists so the navigation isn't broken."
+ *
+ * The FAB is global to the menu shell, not per-screen — it lives here too
+ * so the create action stays reachable from any tab.
  */
 export default function GroupsScreen() {
   return (
@@ -25,6 +30,7 @@ export default function GroupsScreen() {
           subtitle="Browse public and shared groups from this tab in a future release."
         />
       </View>
+      <Fab onPress={() => router.push('/(app)/create')} accessibilityLabel="Create post" />
     </SafeAreaView>
   );
 }

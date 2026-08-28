@@ -2,6 +2,7 @@ import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { EmptyState } from '../../src/components/EmptyState';
+import { Fab } from '../../src/components/Fab';
 import { Button, Text } from '../../src/components/ui';
 import { useAuth } from '../../src/features/auth/hooks/useAuth';
 import { clearRefreshToken } from '../../src/utils/secureStorage';
@@ -10,7 +11,8 @@ import { clearRefreshToken } from '../../src/utils/secureStorage';
  * Phase 2 placeholder. Phase 6 wires real profile (stats, edit, settings).
  * Sign-out stays accessible here because verify-otp's original entry point
  * lived in the stub Home; with Home now showing real content, this is the
- * cleanest place to put it until the real Profile lands.
+ * cleanest place to put it until the real Profile lands. FAB is part of
+ * the menu shell.
  */
 export default function ProfileScreen() {
   const { session, signOut } = useAuth();
@@ -39,6 +41,7 @@ export default function ProfileScreen() {
       <View className="px-4 pb-4">
         <Button label="Sign out" variant="secondary" size="lg" onPress={onSignOut} />
       </View>
+      <Fab onPress={() => router.push('/(app)/create')} accessibilityLabel="Create post" />
     </SafeAreaView>
   );
 }

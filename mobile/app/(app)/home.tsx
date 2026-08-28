@@ -49,20 +49,26 @@ export default function HomeScreen() {
             }}
           />
         )}
+        // flex-grow lets the empty state fill the remaining viewport so it
+        // can centre vertically instead of hugging the top of the list area.
         contentContainerClassName="px-4 pb-24 flex-grow"
         ListEmptyComponent={
           isInitialLoad ? null : error ? (
-            <EmptyState
-              iconName="cloud-off-outline"
-              title="Couldn't load your groups"
-              subtitle="Pull down to refresh, or check your connection."
-            />
+            <View className="flex-1 items-center justify-center">
+              <EmptyState
+                iconName="cloud-off-outline"
+                title="Couldn't load your groups"
+                subtitle="Pull down to refresh, or check your connection."
+              />
+            </View>
           ) : (
-            <EmptyState
-              iconName="account-group-outline"
-              title="No groups yet"
-              subtitle="Start a discussion — tap +"
-            />
+            <View className="flex-1 items-center justify-center">
+              <EmptyState
+                iconName="account-group-outline"
+                title="No groups yet"
+                subtitle="Start a discussion — tap +"
+              />
+            </View>
           )
         }
         ListFooterComponent={

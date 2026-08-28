@@ -1,11 +1,13 @@
 import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { EmptyState } from '../../src/components/EmptyState';
+import { Fab } from '../../src/components/Fab';
 import { Text } from '../../src/components/ui';
 
 /**
  * Phase 2 placeholder. Phase 6 wires real notifications (invites, results
- * available, comments, reports).
+ * available, comments, reports). FAB is part of the menu shell.
  */
 export default function NotificationsScreen() {
   return (
@@ -23,6 +25,7 @@ export default function NotificationsScreen() {
           subtitle="Invites and result reveals will show up here."
         />
       </View>
+      <Fab onPress={() => router.push('/(app)/create')} accessibilityLabel="Create post" />
     </SafeAreaView>
   );
 }

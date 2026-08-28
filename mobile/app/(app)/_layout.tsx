@@ -3,13 +3,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '../../src/theme';
 
 /**
- * App shell tab nav — Phase 2. Five tabs:
- *   Home / Groups / Create / Notifications / Profile
+ * App shell tab nav — Phase 3. Four tabs:
+ *   Home / Groups / Notifications / Profile
  *
- * The "Create" tab is rendered with a special FAB-style treatment (raised
- * icon, primary fill, larger tap target) so it reads as a centre action even
- * though it's structurally a regular tab. Phase 3 promotes the Create
- * screen to a modal presentation.
+ * The Create flow is no longer a tab — it's reached via the floating "+"
+ * button on the bottom-left of the menu (rendered by Home's Fab). Create
+ * routes still live under /(app)/create/* for routing purposes, but they
+ * are hidden from the tab bar.
  */
 export default function AppLayout() {
   return (
@@ -50,19 +50,6 @@ export default function AppLayout() {
         }}
       />
       <Tabs.Screen
-        name="create/index"
-        options={{
-          title: 'Create',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'add-circle' : 'add-circle-outline'}
-              size={32}
-              color={focused ? colors.brand.primary : color}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="notifications"
         options={{
           title: 'Notifications',
@@ -80,6 +67,21 @@ export default function AppLayout() {
           ),
         }}
       />
+
+      {/*
+        expo-router auto-registers every file/folder inside (app)/ as a
+        Tabs.Screen. The 4 above are the actual menu. The rest are nested
+        routes (modal stacks, detail screens) that must be reachable via
+        router.push but MUST NOT appear in the bottom tab bar.
+
+        Without `href: null` they leak into the bar as ghost tabs — the
+        user sees "index", "create", "group/[id]", "post/[id]" as extra
+        options, which is exactly what we're hiding.
+      */}
+      <Tabs.Screen name="index" options={{ href: null }} />
+      <Tabs.Screen name="create" options={{ href: null }} />
+      <Tabs.Screen name="group/[id]" options={{ href: null }} />
+      <Tabs.Screen name="post/[id]" options={{ href: null }} />
     </Tabs>
   );
 }
