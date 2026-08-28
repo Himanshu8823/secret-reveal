@@ -1,22 +1,19 @@
 import { useState } from 'react';
 import {
   View,
-  Text,
   TextInput,
   Pressable,
-  StyleSheet,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { colors } from '../../../src/theme/colors';
-import { typography } from '../../../src/theme/typography';
+import { Button, Text } from '../../../src/components/ui';
+import { colors } from '../../../src/theme';
 import { useComposerStore } from '../../../src/store/composerStore';
 import { createGroup, createPost } from '../../../src/api/posts.api';
 
@@ -93,74 +90,90 @@ export default function CreateInvitesScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>
       <KeyboardAvoidingView
-        style={styles.flex}
+        className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.topBar}>
+        <View
+          className="h-14 px-4 flex-row items-center justify-between border-b border-border"
+          style={{ borderBottomWidth: 0.5 }}
+        >
           <Pressable
             onPress={onBack}
             hitSlop={12}
             accessibilityLabel="Back"
-            style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
+            className="w-10 h-10 items-center justify-center rounded-full active:bg-surface-muted"
           >
-            <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+            <Ionicons name="chevron-back" size={22} color={colors.text.primary} />
           </Pressable>
-          <View style={styles.topBarRight}>
-            <Text style={styles.stepLabel}>Step 3 of 3</Text>
+          <View className="flex-row items-center gap-3">
+            <Text variant="caption" tone="secondary">Step 3 of 3</Text>
             <Pressable
               onPress={onClose}
               hitSlop={8}
               accessibilityLabel="Close create post"
-              style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
+              className="w-10 h-10 items-center justify-center rounded-full active:bg-surface-muted"
             >
-              <Ionicons name="close" size={24} color={colors.textPrimary} />
+              <Ionicons name="close" size={24} color={colors.text.primary} />
             </Pressable>
           </View>
         </View>
 
         <ScrollView
-          style={styles.flex}
-          contentContainerStyle={styles.scrollContent}
+          className="flex-1"
+          contentContainerClassName="px-4 pt-6 pb-6"
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.title}>Group Invitation</Text>
+          <Text variant="h2" className="mb-6">Group Invitation</Text>
 
           {/* Group name */}
-          <View style={styles.section}>
-            <Text style={styles.label}>Group name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Group name"
-              placeholderTextColor={colors.textSecondary}
-              value={localGroupName}
-              onChangeText={(v) => {
-                setLocalGroupName(v);
-                // Persist into the store as the user types so the back-nav
-                // round-trip preserves the value.
-                setGroupName(v);
-              }}
-              maxLength={GROUP_NAME_MAX}
-              autoCorrect={false}
-            />
+          <View className="mb-6">
+            <Text variant="bodyStrong" className="mb-2.5">Group name</Text>
+            <View className="border border-border rounded-md bg-surface py-3 px-4">
+              <TextInput
+                placeholder="Group name"
+                placeholderTextColor={colors.text.secondary}
+                value={localGroupName}
+                onChangeText={(v) => {
+                  setLocalGroupName(v);
+                  // Persist into the store as the user types so the back-nav
+                  // round-trip preserves the value.
+                  setGroupName(v);
+                }}
+                maxLength={GROUP_NAME_MAX}
+                autoCorrect={false}
+                className="text-text-primary"
+                style={{ fontSize: 15, fontWeight: '500' }}
+              />
+            </View>
           </View>
 
           {/* Selected chips */}
           {invitees.length > 0 ? (
-            <View style={styles.chipsRow}>
+            <View className="flex-row flex-wrap gap-2 mb-4 -mt-2">
               {invitees.map((inv) => (
-                <View key={inv.id} style={styles.chip}>
-                  <Text style={styles.chipText} numberOfLines={1}>
+                <View
+                  key={inv.id}
+                  className="flex-row items-center px-3 py-1.5 rounded-full max-w-full bg-primary-subtle"
+                >
+                  <Text
+                    variant="caption"
+                    bold
+                    tone="primary"
+                    numberOfLines={1}
+                    className="mr-1.5"
+                  >
                     {inv.name}
                   </Text>
                   <Pressable
                     onPress={() => toggleInvitee(inv.id, inv.name)}
                     hitSlop={8}
                     accessibilityLabel={`Remove ${inv.name}`}
-                    style={styles.chipRemove}
+                    className="w-5 h-5 items-center justify-center rounded-full"
+                    style={{ backgroundColor: 'rgba(17,17,17,0.08)' }}
                   >
-                    <Ionicons name="close" size={14} color={colors.textPrimary} />
+                    <Ionicons name="close" size={14} color={colors.text.primary} />
                   </Pressable>
                 </View>
               ))}
@@ -168,19 +181,28 @@ export default function CreateInvitesScreen() {
           ) : null}
 
           {/* Invite list */}
-          <View style={styles.section}>
-            <Text style={styles.label}>Invite people</Text>
-            <View style={styles.inviteList}>
+          <View className="mb-6">
+            <Text variant="bodyStrong" className="mb-2.5">Invite people</Text>
+            <View className="rounded-lg bg-surface border border-border overflow-hidden">
               {FIXTURE_INVITEES.map((person) => {
                 const isAdded = invitees.some((i) => i.id === person.id);
                 return (
-                  <View key={person.id} style={styles.inviteRow}>
-                    <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>
+                  <View
+                    key={person.id}
+                    className="flex-row items-center py-3 px-3.5 border-b border-border"
+                    style={{ borderBottomWidth: 0.5 }}
+                  >
+                    <View className="w-9 h-9 rounded-full items-center justify-center mr-3 bg-primary-subtle">
+                      <Text variant="bodyStrong" tone="primary">
                         {person.name.slice(0, 1).toUpperCase()}
                       </Text>
                     </View>
-                    <Text style={styles.inviteName} numberOfLines={1}>
+                    <Text
+                      variant="body"
+                      bold
+                      numberOfLines={1}
+                      className="flex-1 mr-3"
+                    >
                       {person.name}
                     </Text>
                     <Pressable
@@ -188,18 +210,14 @@ export default function CreateInvitesScreen() {
                       accessibilityLabel={
                         isAdded ? `Remove ${person.name}` : `Add ${person.name}`
                       }
-                      style={({ pressed }) => [
-                        styles.addBtn,
-                        isAdded && styles.addBtnAdded,
-                        pressed && styles.addBtnPressed,
-                      ]}
+                      className={[
+                        'px-3 py-2 rounded-sm border active:opacity-70',
+                        isAdded
+                          ? 'bg-primary-subtle border-primary'
+                          : 'bg-surface border-border',
+                      ].join(' ')}
                     >
-                      <Text
-                        style={[
-                          styles.addBtnText,
-                          isAdded && styles.addBtnTextAdded,
-                        ]}
-                      >
+                      <Text variant="caption" bold tone="primary">
                         {isAdded ? 'Added' : 'Add'}
                       </Text>
                     </Pressable>
@@ -207,205 +225,28 @@ export default function CreateInvitesScreen() {
                 );
               })}
             </View>
-            <Text style={styles.helperText}>
+            <Text variant="caption" tone="secondary" className="mt-2.5">
               Contact sync arrives in a later release. For now, pick from this list.
             </Text>
           </View>
         </ScrollView>
 
-        <View style={styles.footer}>
-          <Pressable
-            onPress={onPublish}
+        <View
+          className="px-4 pt-3 pb-2 border-t border-border bg-surface"
+          style={{ borderTopWidth: 0.5 }}
+        >
+          <Button
+            label="Publish"
+            variant="primary"
+            size="lg"
+            fullWidth
+            loading={submitting}
             disabled={!canPublish}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed && styles.primaryButtonPressed,
-              !canPublish && styles.primaryButtonDisabled,
-            ]}
+            onPress={onPublish}
             accessibilityLabel="Publish post"
-          >
-            {submitting ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Publish</Text>
-            )}
-          </Pressable>
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
-  flex: { flex: 1 },
-  topBar: {
-    height: 56,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 9999,
-  },
-  iconBtnPressed: { backgroundColor: '#F5F6F7' },
-  topBarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  stepLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 24,
-    paddingBottom: 24,
-  },
-  title: {
-    ...typography.h2,
-    color: colors.textPrimary,
-    marginBottom: 24,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  label: {
-    ...typography.bodyStrong,
-    fontSize: 14,
-    color: colors.textPrimary,
-    marginBottom: 10,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    fontSize: 15,
-    fontWeight: '500',
-    color: colors.textPrimary,
-    backgroundColor: '#FFFFFF',
-  },
-  chipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
-    marginTop: -8,
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: 12,
-    paddingRight: 6,
-    paddingVertical: 6,
-    borderRadius: 9999,
-    backgroundColor: '#E8EEFE',
-    maxWidth: '100%',
-  },
-  chipText: {
-    ...typography.caption,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginRight: 6,
-  },
-  chipRemove: {
-    width: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 9999,
-    backgroundColor: 'rgba(17,17,17,0.08)',
-  },
-  inviteList: {
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  inviteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 9999,
-    backgroundColor: '#E8EEFE',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    ...typography.bodyStrong,
-    color: colors.primary,
-  },
-  inviteName: {
-    flex: 1,
-    ...typography.body,
-    fontWeight: '500',
-    color: colors.textPrimary,
-    marginRight: 12,
-  },
-  addBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
-  },
-  addBtnPressed: { backgroundColor: '#F5F6F7' },
-  addBtnAdded: {
-    borderColor: colors.primary,
-    backgroundColor: '#E8EEFE',
-  },
-  addBtnText: {
-    ...typography.caption,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  addBtnTextAdded: { color: colors.primary },
-  helperText: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: 10,
-  },
-  footer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-    backgroundColor: '#FFFFFF',
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonPressed: { backgroundColor: colors.primaryPressed },
-  primaryButtonDisabled: { opacity: 0.5 },
-  primaryButtonText: {
-    ...typography.button,
-    color: '#FFFFFF',
-  },
-});

@@ -9,10 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import CountryPicker, {
-  Country,
-  CountryCode,
-} from 'react-native-country-picker-modal';
+import { CountryPicker, type PickedCountry } from '../../src/components/CountryPicker';
 import { Button, Input, Text } from '../../src/components/ui';
 import { GoogleIcon } from '../../src/components/GoogleIcon';
 import { colors, spacing } from '../../src/theme';
@@ -22,15 +19,7 @@ import { usePhoneValidation } from '../../src/features/auth/hooks/usePhoneValida
 
 // Default to India (+91). The picker is fully functional; users can switch
 // country and the dial code is composed from the picker's selection.
-const DEFAULT_COUNTRY: CountryCode = 'IN';
-
-/**
- * The country-picker-modal library types `Country` with required fields
- * (region, subregion, currency, flag) that aren't populated by default.
- * For our use we only need cca2, callingCode, name — so we model a slim
- * subset of what the picker actually gives us.
- */
-type PickedCountry = Pick<Country, 'cca2' | 'callingCode' | 'name'>;
+const DEFAULT_COUNTRY = 'IN';
 
 export default function LoginScreen() {
   const { sendOtp } = useAuth();
@@ -39,7 +28,7 @@ export default function LoginScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [country, setCountry] = useState<PickedCountry>({
     cca2: DEFAULT_COUNTRY,
-    callingCode: ['91'],
+    callingCode: '91',
     name: 'India',
   });
   const [pickerVisible, setPickerVisible] = useState(false);
@@ -106,10 +95,10 @@ export default function LoginScreen() {
                   onPress={() => setPickerVisible(true)}
                   className="flex-row items-center pr-3"
                   accessibilityRole="button"
-                  accessibilityLabel={`Country code +${country.callingCode[0]}`}
+                  accessibilityLabel={`Country code +${country.callingCode}`}
                 >
                   <Text variant="body" tone="primary" bold>
-                    +{country.callingCode[0]}
+                    +{country.callingCode}
                   </Text>
                   <MaterialCommunityIcons
                     name="chevron-down"
@@ -123,11 +112,9 @@ export default function LoginScreen() {
 
             {pickerVisible && (
               <CountryPicker
-                countryCode={country.cca2 as CountryCode}
+                countryCode={country.cca2}
                 withFilter
-                withFlag={false}
                 withCallingCode
-                withModal
                 visible={pickerVisible}
                 onClose={() => setPickerVisible(false)}
                 onSelect={(c) => {

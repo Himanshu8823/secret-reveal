@@ -4,7 +4,13 @@ const { withNativeWind } = require('nativewind/metro');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-const finalConfig = withNativeWind(config, { input: './global.css' });
+const finalConfig = withNativeWind(config, {
+  input: './global.css',
+  // Renamed to .cjs so jiti inside `withNativeWind` can load it without
+  // resolving the TS source from `src/theme/` through `index.ts`. The
+  // literals in tailwind.config.cjs mirror the values in src/theme/*.
+  configPath: './tailwind.config.cjs',
+});
 
 // NativeWind v4 and its dep react-native-css-interop@0.1.22 ship a subpath
 // import ("react-native-css-interop/jsx-runtime") backed only by a folder-
@@ -13,10 +19,31 @@ const finalConfig = withNativeWind(config, { input: './global.css' });
 // resolver refuses to follow this legacy shim and reports "Unable to
 // resolve ... from app/_layout.tsx". We pin both subpath imports to the
 // real files so resolution succeeds.
+//
+// We resolve the package's install location via a relative glob through
+// the pnpm `.pnpm/` tree rather than `require.resolve('.../package.json')`,
+// because the latter relies on Node subpath resolution which the package's
+// own (missing) `exports` field breaks on Windows + Node 24.
 const path = require('path');
-const cssInteropRoot = path.dirname(
-  require.resolve('react-native-css-interop/package.json')
-);
+const fs = require('fs');
+const cssInteropCandidates = fs
+  .readdirSync(path.join(__dirname, 'node_modules/.pnpm'))
+  .filter((d) => d.startsWith('react-native-css-interop@'))
+  .map((d) =>
+    path.join(
+      __dirname,
+      'node_modules/.pnpm',
+      d,
+      'node_modules/react-native-css-interop',
+    ),
+  )
+  .filter((p) => fs.existsSync(p));
+if (cssInteropCandidates.length === 0) {
+  throw new Error(
+    'metro.config.js: cannot find react-native-css-interop under node_modules/.pnpm — re-run `pnpm install`',
+  );
+}
+const cssInteropRoot = cssInteropCandidates[0];
 
 const previousResolveRequest = finalConfig.resolver.resolveRequest;
 finalConfig.resolver.resolveRequest = (context, moduleName, platform) => {

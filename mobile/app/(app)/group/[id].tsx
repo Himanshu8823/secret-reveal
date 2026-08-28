@@ -1,17 +1,12 @@
 import { useCallback } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  RefreshControl,
-  StyleSheet,
-  Pressable,
-} from 'react-native';
+import { View, FlatList, RefreshControl, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors } from '../../../src/theme/colors';
+import { colors, elevation, radius } from '../../../src/theme';
+import { Text } from '../../../src/components/ui';
+import { Fab } from '../../../src/components/Fab';
 import { EmptyState } from '../../../src/components/EmptyState';
 import { listGroupPosts, type PostSummary } from '../../../src/api/posts.api';
 
@@ -33,22 +28,24 @@ export default function GroupDetailScreen() {
   const isInitialLoad = postsQuery.isLoading && !postsQuery.data;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
+    <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
+      <View className="flex-row items-center px-4 py-3 border-b border-border bg-surface">
         <Pressable
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel="Back"
           hitSlop={8}
-          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+          className="w-10 h-10 rounded-full items-center justify-center mr-1 active:bg-surface-muted"
         >
-          <MaterialCommunityIcons name="chevron-left" size={24} color={colors.textPrimary} />
+          <MaterialCommunityIcons name="chevron-left" size={24} color={colors.text.primary} />
         </Pressable>
-        <View style={styles.headerBody}>
-          <Text style={styles.title} numberOfLines={1}>
+        <View className="flex-1 min-w-0 ml-1">
+          <Text variant="h2" numberOfLines={1}>
             {groupNamePlaceholder}
           </Text>
-          <Text style={styles.meta}>Member count</Text>
+          <Text variant="meta" tone="secondary" className="mt-0.5">
+            Member count
+          </Text>
         </View>
       </View>
 
@@ -66,7 +63,7 @@ export default function GroupDetailScreen() {
             }}
           />
         )}
-        contentContainerStyle={styles.list}
+        contentContainerClassName="px-4 pt-4 pb-24 flex-grow"
         ListEmptyComponent={
           isInitialLoad ? null : postsQuery.error ? (
             <EmptyState
@@ -86,22 +83,18 @@ export default function GroupDetailScreen() {
           <RefreshControl
             refreshing={postsQuery.isFetching && !postsQuery.isLoading}
             onRefresh={onRefresh}
-            tintColor={colors.primary}
+            tintColor={colors.brand.primary}
           />
         }
       />
 
-      <Pressable
+      <Fab
         onPress={() => {
           // Create-post entry point — for now reuses the existing Create tab.
           router.push('/(app)/create');
         }}
-        accessibilityRole="button"
         accessibilityLabel="Start a discussion"
-        style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
-      >
-        <MaterialCommunityIcons name="plus" size={28} color="#FFFFFF" />
-      </Pressable>
+      />
     </SafeAreaView>
   );
 }
@@ -109,49 +102,64 @@ export default function GroupDetailScreen() {
 function PostCard({ post, onPress }: { post: PostSummary; onPress: () => void }) {
   const initials = authorInitials(post.authorName);
   const avatarColor = avatarColorFor(post.authorId);
+  const statusBg =
+    post.status === 'active'
+      ? 'bg-pill-info'
+      : post.status === 'revealed'
+      ? 'bg-surface-muted'
+      : '';
 
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
       accessibilityRole="button"
       accessibilityLabel={`Open post by ${post.authorName ?? 'unknown'}`}
+      className="bg-surface rounded-lg p-4 mb-3 border border-border active:bg-surface-muted"
+      style={{ borderRadius: radius.lg, ...elevation[1] }}
     >
-      <View style={styles.cardHead}>
-        <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
-          <Text style={styles.avatarText}>{initials}</Text>
+      <View className="flex-row items-center mb-2.5">
+        <View
+          className="w-9 h-9 rounded-full items-center justify-center mr-3"
+          style={{ backgroundColor: avatarColor }}
+        >
+          <Text variant="metaStrong" tone="onDark">
+            {initials}
+          </Text>
         </View>
-        <View style={styles.cardHeadBody}>
-          <Text style={styles.author} numberOfLines={1}>
+        <View className="flex-1 min-w-0 flex-row items-center justify-between">
+          <Text variant="bodyStrong" numberOfLines={1} className="flex-1 mr-2">
             {post.authorName ?? 'Unknown author'}
           </Text>
-          <View
-            style={[
-              styles.statusBadge,
-              post.status === 'active' ? styles.statusBadgeActive : styles.statusBadgeRevealed,
-            ]}
-          >
-            <Text style={styles.statusText}>{statusLabel(post.status)}</Text>
+          <View className={`px-2.5 py-1 rounded-sm ${statusBg}`}>
+            <Text variant="caption" bold>
+              {statusLabel(post.status)}
+            </Text>
           </View>
         </View>
       </View>
 
-      <Text style={styles.caption} numberOfLines={3}>
+      <Text variant="body" className="mb-3" numberOfLines={3}>
         {post.caption}
       </Text>
 
-      <View style={styles.iconRow}>
-        <View style={styles.iconItem}>
-          <MaterialCommunityIcons name="message-outline" size={16} color={colors.textSecondary} />
-          <Text style={styles.iconText}>{post.commentCount}</Text>
+      <View className="flex-row items-center gap-4">
+        <View className="flex-row items-center">
+          <MaterialCommunityIcons name="message-outline" size={16} color={colors.text.secondary} />
+          <Text variant="meta" tone="secondary" className="ml-1.5">
+            {post.commentCount}
+          </Text>
         </View>
-        <View style={styles.iconItem}>
-          <MaterialCommunityIcons name="heart-outline" size={16} color={colors.textSecondary} />
-          <Text style={styles.iconText}>{post.reactionCount}</Text>
+        <View className="flex-row items-center">
+          <MaterialCommunityIcons name="heart-outline" size={16} color={colors.text.secondary} />
+          <Text variant="meta" tone="secondary" className="ml-1.5">
+            {post.reactionCount}
+          </Text>
         </View>
-        <View style={styles.iconItem}>
-          <MaterialCommunityIcons name="reply" size={16} color={colors.textSecondary} />
-          <Text style={styles.iconText}>{post.responseCount}</Text>
+        <View className="flex-row items-center">
+          <MaterialCommunityIcons name="reply" size={16} color={colors.text.secondary} />
+          <Text variant="meta" tone="secondary" className="ml-1.5">
+            {post.responseCount}
+          </Text>
         </View>
       </View>
     </Pressable>
@@ -183,152 +191,3 @@ function avatarColorFor(seed: string): string {
   }
   return palette[h % palette.length];
 }
-
-const AVATAR_SIZE = 36;
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: '#FFFFFF',
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 9999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 4,
-  },
-  backBtnPressed: {
-    backgroundColor: '#F5F6F8',
-  },
-  headerBody: {
-    flex: 1,
-    minWidth: 0,
-    marginLeft: 4,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-    color: colors.textPrimary,
-  },
-  meta: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  list: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 96,
-    flexGrow: 1,
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cardPressed: {
-    backgroundColor: '#F5F6F8',
-  },
-  cardHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  avatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: 9999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  cardHeadBody: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  author: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginRight: 8,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  statusBadgeActive: {
-    backgroundColor: '#E8EEFE',
-  },
-  statusBadgeRevealed: {
-    backgroundColor: '#F5F6F8',
-  },
-  statusText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  caption: {
-    fontSize: 15,
-    fontWeight: '400',
-    color: colors.textPrimary,
-    lineHeight: 22,
-    marginBottom: 12,
-  },
-  iconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  iconItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  iconText: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.textSecondary,
-    marginLeft: 6,
-  },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 96,
-    width: 56,
-    height: 56,
-    borderRadius: 9999,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  fabPressed: {
-    backgroundColor: '#0940D6',
-  },
-});

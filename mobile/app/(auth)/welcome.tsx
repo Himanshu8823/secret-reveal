@@ -1,19 +1,13 @@
 import { useState } from 'react';
 import {
   View,
-  Text,
-  TextInput,
-  Pressable,
-  StyleSheet,
   Alert,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { colors } from '../../src/theme/colors';
-import { typography } from '../../src/theme/typography';
+import { Button, Input, Text } from '../../src/components/ui';
 import { updateProfile } from '../../src/api/users.api';
 import { useAuthStore } from '../../src/store/authStore';
 import { setStoredUser } from '../../src/utils/secureStorage';
@@ -69,100 +63,42 @@ export default function WelcomeScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>
       <KeyboardAvoidingView
-        style={styles.flex}
+        className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.content}>
-          <View style={styles.headerWrap}>
-            <Text style={styles.title}>Welcome to NEXORA</Text>
-            <Text style={styles.subtitle}>What should we call you?</Text>
+        <View className="flex-1 p-6 pt-12">
+          <View className="pt-6 pb-2">
+            <Text variant="h1">Welcome to NEXORA</Text>
+            <Text variant="body" tone="secondary" className="mt-2">
+              What should we call you?
+            </Text>
           </View>
 
-          <View style={styles.body}>
-            <TextInput
-              style={styles.input}
+          <View className="flex-1 justify-center">
+            <Input
               placeholder="Your name"
-              placeholderTextColor={colors.textSecondary}
               maxLength={60}
               autoFocus
               value={name}
               onChangeText={setName}
-              selectionColor={colors.primary}
               returnKeyType="done"
               onSubmitEditing={onContinue}
+              containerClassName="mb-5"
             />
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.primaryButton,
-                pressed && styles.primaryButtonPressed,
-                submitting && styles.primaryButtonDisabled,
-              ]}
+            <Button
+              label="Continue"
+              variant="primary"
+              size="lg"
+              fullWidth
+              loading={submitting}
               onPress={onContinue}
-              disabled={submitting}
-            >
-              {submitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.primaryButtonText}>Continue</Text>
-              )}
-            </Pressable>
+            />
           </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  flex: { flex: 1 },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 48,
-  },
-  headerWrap: {
-    paddingTop: 24,
-    paddingBottom: 8,
-  },
-  title: {
-    ...typography.h1,
-    color: colors.textPrimary,
-    marginBottom: 8,
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
-  },
-  body: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    ...typography.body,
-    color: colors.textPrimary,
-    backgroundColor: '#FFFFFF',
-    marginBottom: 20,
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonPressed: { backgroundColor: colors.primaryPressed },
-  primaryButtonDisabled: { opacity: 0.7 },
-  primaryButtonText: {
-    ...typography.button,
-    color: '#fff',
-  },
-});

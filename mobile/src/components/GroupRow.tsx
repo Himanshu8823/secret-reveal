@@ -1,7 +1,7 @@
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors } from '../theme/colors';
 import type { GroupSummary } from '../api/groups.api';
+import { Text } from './ui';
 
 type Props = {
   group: GroupSummary;
@@ -24,34 +24,47 @@ export function GroupRow({ group, onPress }: Props) {
   return (
     <Pressable
       onPress={onPress ? () => onPress(group) : undefined}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      className="flex-row items-center bg-surface border border-border rounded-lg p-4 mb-3 active:bg-surface-muted"
       accessibilityRole="button"
       accessibilityLabel={`Open group ${group.name}`}
     >
-      <View style={styles.avatarStack}>
-        <View style={[styles.avatar, styles.avatar0, { backgroundColor: colors3[0] }]}>
-          <Text style={styles.avatarText}>{initials[0]}</Text>
+      <View className="relative w-16 h-8 mr-3">
+        <View
+          className="absolute top-0 left-0 w-8 h-8 rounded-full border-2 border-surface items-center justify-center"
+          style={{ backgroundColor: colors3[0] }}
+        >
+          <Text variant="caption" tone="onDark" bold>
+            {initials[0]}
+          </Text>
         </View>
-        <View style={[styles.avatar, styles.avatar1, { backgroundColor: colors3[1] }]}>
-          <Text style={styles.avatarText}>{initials[1] ?? initials[0]}</Text>
+        <View
+          className="absolute top-0 left-4 w-8 h-8 rounded-full border-2 border-surface items-center justify-center"
+          style={{ backgroundColor: colors3[1] }}
+        >
+          <Text variant="caption" tone="onDark" bold>
+            {initials[1] ?? initials[0]}
+          </Text>
         </View>
-        <View style={[styles.avatar, styles.avatar2, { backgroundColor: colors3[2] }]}>
-          <Text style={styles.avatarText}>
+        <View
+          className="absolute top-0 left-8 w-8 h-8 rounded-full border-2 border-surface items-center justify-center"
+          style={{ backgroundColor: colors3[2] }}
+        >
+          <Text variant="caption" tone="onDark" bold>
             {group.memberCount > 3 ? `+${group.memberCount - 2}` : initials[2] ?? initials[0]}
           </Text>
         </View>
       </View>
 
-      <View style={styles.body}>
-        <View style={styles.headRow}>
-          <Text style={styles.name} numberOfLines={1}>
+      <View className="flex-1 min-w-0">
+        <View className="flex-row justify-between items-center mb-0.5">
+          <Text variant="title" tone="primary" className="flex-1 mr-2" numberOfLines={1}>
             {group.name}
           </Text>
-          <Text style={styles.meta} numberOfLines={1}>
+          <Text variant="meta" tone="secondary" numberOfLines={1}>
             {formatRelative(group.lastActivityAt)}
           </Text>
         </View>
-        <Text style={styles.preview} numberOfLines={1}>
+        <Text variant="meta" tone="secondary" numberOfLines={1}>
           {previewFor(group)}
         </Text>
       </View>
@@ -59,8 +72,7 @@ export function GroupRow({ group, onPress }: Props) {
       <MaterialCommunityIcons
         name="chevron-right"
         size={20}
-        color={colors.textSecondary}
-        style={styles.chevron}
+        className="ml-2 text-text-secondary"
       />
     </Pressable>
   );
@@ -116,74 +128,3 @@ function formatRelative(iso: string): string {
   const wk = Math.floor(day / 7);
   return `${wk}w`;
 }
-
-const AVATAR_SIZE = 32;
-
-const styles = StyleSheet.create({
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  cardPressed: {
-    backgroundColor: '#F5F6F8',
-  },
-  avatarStack: {
-    width: 64,
-    height: AVATAR_SIZE,
-    marginRight: 12,
-  },
-  avatar: {
-    position: 'absolute',
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: 9999,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatar0: { left: 0 },
-  avatar1: { left: 16 },
-  avatar2: { left: 32 },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  body: {
-    flex: 1,
-    minWidth: 0,
-  },
-  headRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  name: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginRight: 8,
-  },
-  meta: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.textSecondary,
-  },
-  preview: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.textSecondary,
-  },
-  chevron: {
-    marginLeft: 8,
-  },
-});

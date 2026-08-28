@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { View, Text, FlatList, RefreshControl, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -7,7 +7,8 @@ import { listMyGroups } from '../../src/api/groups.api';
 import { GroupRow } from '../../src/components/GroupRow';
 import { Fab } from '../../src/components/Fab';
 import { EmptyState } from '../../src/components/EmptyState';
-import { colors } from '../../src/theme/colors';
+import { Text } from '../../src/components/ui';
+import { colors } from '../../src/theme';
 
 export default function HomeScreen() {
   const { data, isLoading, isFetching, refetch, error } = useQuery({
@@ -24,10 +25,10 @@ export default function HomeScreen() {
   const isInitialLoad = isLoading && !data;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Your groups</Text>
-        <Text style={styles.subtitle}>
+    <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
+      <View className="px-4 py-3">
+        <Text variant="h1">Your groups</Text>
+        <Text variant="meta" tone="secondary" className="mt-1">
           {isInitialLoad
             ? 'Loading…'
             : groups.length === 0
@@ -48,7 +49,7 @@ export default function HomeScreen() {
             }}
           />
         )}
-        contentContainerStyle={styles.list}
+        contentContainerClassName="px-4 pb-24 flex-grow"
         ListEmptyComponent={
           isInitialLoad ? null : error ? (
             <EmptyState
@@ -66,8 +67,8 @@ export default function HomeScreen() {
         }
         ListFooterComponent={
           nextCursor ? (
-            <View style={styles.footer}>
-              <ActivityIndicator color={colors.primary} />
+            <View className="py-6 items-center">
+              <ActivityIndicator color={colors.brand.primary} />
             </View>
           ) : null
         }
@@ -75,7 +76,7 @@ export default function HomeScreen() {
           <RefreshControl
             refreshing={isFetching && !isLoading}
             onRefresh={onRefresh}
-            tintColor={colors.primary}
+            tintColor={colors.brand.primary}
           />
         }
       />
@@ -84,33 +85,3 @@ export default function HomeScreen() {
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.4,
-    color: colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: 13,
-    fontWeight: '400',
-    color: colors.textSecondary,
-    marginTop: 4,
-  },
-  list: {
-    paddingHorizontal: 16,
-    paddingBottom: 96,
-    flexGrow: 1,
-  },
-  footer: {
-    paddingVertical: 24,
-    alignItems: 'center',
-  },
-});

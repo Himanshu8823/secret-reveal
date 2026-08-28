@@ -43,35 +43,32 @@ export function validatePhone(
   // specific to "country not supported" rather than the generic
   // libphonenumber failure.
   if (!ALLOWED_COUNTRIES.includes(countryCode as CountryCode)) {
-    return {
-      ok: false,
-      reason: `Country not supported. Allowed: ${ALLOWED_COUNTRIES.join(', ')}`,
-    };
+    return { ok: false, reason: 'Invalid Mobile Number' };
   }
 
   // Strip everything that isn't a digit. The picker gives us a clean
   // national number, but the user might paste with spaces or dashes.
   const digits = rawPhoneNumber.replace(/\D/g, '');
   if (digits.length < 4 || digits.length > 16) {
-    return { ok: false, reason: 'Phone number is the wrong length' };
+    return { ok: false, reason: 'Invalid Mobile Number' };
   }
 
   // `parsePhoneNumberFromString` returns null if the number can't be
   // parsed at all given the default country.
   const parsed = parsePhoneNumberFromString(digits, countryCode as CountryCode);
   if (!parsed) {
-    return { ok: false, reason: 'Unparseable phone number' };
+    return { ok: false, reason: 'Invalid Mobile Number' };
   }
 
   if (!isValidPhoneNumber(parsed.number as string)) {
-    return { ok: false, reason: 'Invalid phone number for the selected country' };
+    return { ok: false, reason: 'Invalid Mobile Number' };
   }
 
   // `metadata/min` returns a value here too. Same as backend:
   // accept MOBILE or FIXED_LINE_OR_MOBILE; reject FIXED_LINE / VOIP etc.
   const type = parsed.getType();
   if (type && type !== 'MOBILE' && type !== 'FIXED_LINE_OR_MOBILE') {
-    return { ok: false, reason: 'Only mobile numbers can receive OTP' };
+    return { ok: false, reason: 'Invalid Mobile Number' };
   }
 
   return { ok: true, e164: parsed.number as `+${string}` };

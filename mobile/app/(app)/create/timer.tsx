@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import {
   View,
-  Text,
   TextInput,
   Pressable,
-  StyleSheet,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -12,8 +10,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../../../src/theme/colors';
-import { typography } from '../../../src/theme/typography';
+import { Button, Text } from '../../../src/components/ui';
+import { colors } from '../../../src/theme';
 import { useComposerStore } from '../../../src/store/composerStore';
 
 type PresetKey = '30m' | '1h' | '3h' | 'custom';
@@ -74,40 +72,43 @@ export default function CreateTimerScreen() {
   const onClose = () => router.dismissTo('/(app)/home');
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>
       <KeyboardAvoidingView
-        style={styles.flex}
+        className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.topBar}>
+        <View
+          className="h-14 px-4 flex-row items-center justify-between border-b border-border"
+          style={{ borderBottomWidth: 0.5 }}
+        >
           <Pressable
             onPress={onBack}
             hitSlop={12}
             accessibilityLabel="Back"
-            style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
+            className="w-10 h-10 items-center justify-center rounded-full active:bg-surface-muted"
           >
-            <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+            <Ionicons name="chevron-back" size={22} color={colors.text.primary} />
           </Pressable>
-          <View style={styles.topBarRight}>
-            <Text style={styles.stepLabel}>Step 2 of 3</Text>
+          <View className="flex-row items-center gap-3">
+            <Text variant="caption" tone="secondary">Step 2 of 3</Text>
             <Pressable
               onPress={onClose}
               hitSlop={8}
               accessibilityLabel="Close create post"
-              style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
+              className="w-10 h-10 items-center justify-center rounded-full active:bg-surface-muted"
             >
-              <Ionicons name="close" size={24} color={colors.textPrimary} />
+              <Ionicons name="close" size={24} color={colors.text.primary} />
             </Pressable>
           </View>
         </View>
 
-        <View style={styles.body}>
-          <Text style={styles.title}>Set Result Timer</Text>
-          <Text style={styles.subtitle}>
+        <View className="flex-1 p-4 pt-6">
+          <Text variant="h2" className="mb-1.5">Set Result Timer</Text>
+          <Text variant="body" tone="secondary" className="mb-6">
             After this time, responses become visible to everyone.
           </Text>
 
-          <View style={styles.optionList}>
+          <View className="gap-3">
             {PRESETS.map((p) => {
               const isSelected = selected === p.key;
               return (
@@ -116,40 +117,49 @@ export default function CreateTimerScreen() {
                   onPress={() => setSelected(p.key)}
                   accessibilityRole="radio"
                   accessibilityState={{ selected: isSelected }}
-                  style={({ pressed }) => [
-                    styles.optionRow,
-                    isSelected && styles.optionRowSelected,
-                    pressed && styles.optionRowPressed,
-                  ]}
+                  className={[
+                    'flex-row items-center justify-between p-4 rounded-md border active:opacity-85',
+                    isSelected
+                      ? 'bg-primary-subtle border-primary'
+                      : 'bg-surface border-border',
+                  ].join(' ')}
                 >
-                  <View style={styles.optionText}>
-                    <Text style={styles.optionLabel}>{p.label}</Text>
-                    <Text style={styles.optionSub}>{p.sub}</Text>
+                  <View className="flex-1 pr-3">
+                    <Text variant="bodyStrong" tone="primary">{p.label}</Text>
+                    <Text variant="caption" tone="secondary" className="mt-1">{p.sub}</Text>
                   </View>
                   <View
-                    style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}
+                    className={[
+                      'w-[22px] h-[22px] rounded-full items-center justify-center border-2',
+                      isSelected ? 'border-primary' : 'border-border',
+                    ].join(' ')}
                   >
-                    {isSelected ? <View style={styles.radioInner} /> : null}
+                    {isSelected ? (
+                      <View className="w-2.5 h-2.5 rounded-full bg-primary" />
+                    ) : null}
                   </View>
                 </Pressable>
               );
             })}
 
             {selected === 'custom' ? (
-              <View style={styles.customWrap}>
-                <Text style={styles.customLabel}>Minutes</Text>
-                <TextInput
-                  style={styles.customInput}
-                  value={customValue}
-                  onChangeText={setCustomValue}
-                  keyboardType="number-pad"
-                  inputMode="numeric"
-                  maxLength={4}
-                  placeholder="e.g. 90"
-                  placeholderTextColor={colors.textSecondary}
-                  autoFocus
-                />
-                <Text style={styles.customHint}>
+              <View className="px-4 pt-2">
+                <Text variant="caption" tone="secondary" className="mb-2">Minutes</Text>
+                <View className="border border-primary rounded-md bg-surface py-3 px-4">
+                  <TextInput
+                    value={customValue}
+                    onChangeText={setCustomValue}
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="e.g. 90"
+                    placeholderTextColor={colors.text.secondary}
+                    autoFocus
+                    className="text-text-primary"
+                    style={{ fontSize: 16, fontWeight: '500' }}
+                  />
+                </View>
+                <Text variant="caption" tone="secondary" className="mt-2">
                   Between {CUSTOM_MIN} and {CUSTOM_MAX} minutes.
                 </Text>
               </View>
@@ -157,155 +167,18 @@ export default function CreateTimerScreen() {
           </View>
         </View>
 
-        <View style={styles.footer}>
-          <Pressable
-            onPress={onNext}
+        <View className="px-4 pt-3 pb-2">
+          <Button
+            label="Next →"
+            variant="primary"
+            size="lg"
+            fullWidth
             disabled={!canContinue}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed && styles.primaryButtonPressed,
-              !canContinue && styles.primaryButtonDisabled,
-            ]}
+            onPress={onNext}
             accessibilityLabel="Continue to invites"
-          >
-            <Text style={styles.primaryButtonText}>Next →</Text>
-          </Pressable>
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
-  flex: { flex: 1 },
-  topBar: {
-    height: 56,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 9999,
-  },
-  iconBtnPressed: { backgroundColor: '#F5F6F7' },
-  topBarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  stepLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-  },
-  body: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 24,
-  },
-  title: {
-    ...typography.h2,
-    color: colors.textPrimary,
-    marginBottom: 6,
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginBottom: 24,
-  },
-  optionList: {
-    gap: 12,
-  },
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: '#FFFFFF',
-  },
-  optionRowSelected: {
-    borderColor: colors.primary,
-    backgroundColor: '#E8EEFE',
-  },
-  optionRowPressed: { opacity: 0.85 },
-  optionText: { flex: 1, paddingRight: 12 },
-  optionLabel: {
-    ...typography.bodyStrong,
-    color: colors.textPrimary,
-  },
-  optionSub: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: 4,
-  },
-  radioOuter: {
-    width: 22,
-    height: 22,
-    borderRadius: 9999,
-    borderWidth: 2,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioOuterSelected: { borderColor: colors.primary },
-  radioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 9999,
-    backgroundColor: colors.primary,
-  },
-  customWrap: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  customLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginBottom: 8,
-  },
-  customInput: {
-    borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.textPrimary,
-    backgroundColor: '#FFFFFF',
-  },
-  customHint: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: 8,
-  },
-  footer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonPressed: { backgroundColor: colors.primaryPressed },
-  primaryButtonDisabled: { opacity: 0.5 },
-  primaryButtonText: {
-    ...typography.button,
-    color: '#FFFFFF',
-  },
-});

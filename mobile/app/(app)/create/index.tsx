@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import {
   View,
-  Text,
   TextInput,
   Pressable,
-  StyleSheet,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -12,8 +10,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../../../src/theme/colors';
-import { typography } from '../../../src/theme/typography';
+import { Button, Text } from '../../../src/components/ui';
+import { colors, spacing } from '../../../src/theme';
 import { useComposerStore } from '../../../src/store/composerStore';
 
 const CAPTION_MAX = 2000;
@@ -53,45 +51,57 @@ export default function CreateCaptionScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>
       <KeyboardAvoidingView
-        style={styles.flex}
+        className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {/* Top bar — 56 px, close + next */}
-        <View style={styles.topBar}>
+        <View
+          className="h-14 px-4 flex-row items-center justify-between border-b border-border"
+          style={{ borderBottomWidth: 0.5 }}
+        >
           <Pressable
             onPress={onClose}
             hitSlop={12}
             accessibilityLabel="Close create post"
-            style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
+            className="w-10 h-10 items-center justify-center rounded-full active:bg-surface-muted"
           >
-            <Ionicons name="close" size={24} color={colors.textPrimary} />
+            <Ionicons name="close" size={24} color={colors.text.primary} />
           </Pressable>
-          <View style={styles.topBarRight}>
-            <Text style={styles.stepLabel}>Step 1 of 3</Text>
+          <View className="flex-row items-center gap-3">
+            <Text variant="caption" tone="secondary">Step 1 of 3</Text>
             <Pressable
               onPress={onNext}
               hitSlop={8}
               accessibilityLabel="Next step"
-              style={({ pressed }) => [
-                styles.nextPill,
-                pressed && styles.nextPillPressed,
-                !canContinue && styles.nextPillDisabled,
-              ]}
+              disabled={!canContinue}
+              className={[
+                'px-3 py-2 rounded-full active:opacity-90',
+                canContinue ? 'bg-primary' : 'bg-border',
+              ].join(' ')}
             >
-              <Text style={[styles.nextPillText, !canContinue && styles.nextPillTextDisabled]}>
+              <Text
+                variant="bodyStrong"
+                tone={canContinue ? 'onDark' : 'secondary'}
+              >
                 Next
               </Text>
             </Pressable>
           </View>
         </View>
 
-        <View style={styles.body}>
+        <View className="flex-1 p-4">
           <TextInput
-            style={styles.captionInput}
+            className="min-h-[180px] text-text-primary"
+            style={{
+              fontSize: 18,
+              fontWeight: '500',
+              lineHeight: 26,
+              paddingTop: spacing[1],
+            }}
             placeholder="What do you want to discuss?"
-            placeholderTextColor={colors.textSecondary}
+            placeholderTextColor={colors.text.secondary}
             multiline
             autoFocus
             maxLength={CAPTION_MAX}
@@ -100,7 +110,7 @@ export default function CreateCaptionScreen() {
             textAlignVertical="top"
           />
 
-          <View style={styles.mediaGrid}>
+          <View className="flex-row flex-wrap mt-4 -mx-1.5">
             {MEDIA_OPTIONS.map((opt) => (
               <Pressable
                 key={opt.key}
@@ -110,126 +120,29 @@ export default function CreateCaptionScreen() {
                   Alert.alert('Coming soon', `${opt.label} upload lands in Phase 3b.`);
                 }}
                 accessibilityLabel={opt.label}
-                style={({ pressed }) => [styles.mediaTile, pressed && styles.mediaTilePressed]}
+                className="w-1/4 aspect-square items-center justify-center px-1.5 my-1.5 active:opacity-70"
               >
-                <Ionicons name={opt.icon as never} size={22} color={colors.textPrimary} />
-                <Text style={styles.mediaLabel}>{opt.label}</Text>
+                <Ionicons name={opt.icon as never} size={22} color={colors.text.primary} />
+                <Text variant="caption" tone="secondary" className="mt-1.5">
+                  {opt.label}
+                </Text>
               </Pressable>
             ))}
           </View>
         </View>
 
-        <View style={styles.footer}>
-          <Pressable
-            onPress={onNext}
+        <View className="px-4 pt-3 pb-2">
+          <Button
+            label="Next →"
+            variant="primary"
+            size="lg"
+            fullWidth
             disabled={!canContinue}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed && styles.primaryButtonPressed,
-              !canContinue && styles.primaryButtonDisabled,
-            ]}
+            onPress={onNext}
             accessibilityLabel="Continue to timer"
-          >
-            <Text style={styles.primaryButtonText}>Next →</Text>
-          </Pressable>
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
-  flex: { flex: 1 },
-  topBar: {
-    height: 56,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 9999,
-  },
-  iconBtnPressed: { backgroundColor: '#F5F6F7' },
-  topBarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  stepLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-  },
-  nextPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 9999,
-    backgroundColor: colors.primary,
-  },
-  nextPillPressed: { backgroundColor: colors.primaryPressed },
-  nextPillDisabled: { backgroundColor: '#E4E5E7' },
-  nextPillText: {
-    ...typography.bodyStrong,
-    fontSize: 14,
-    color: '#FFFFFF',
-  },
-  nextPillTextDisabled: { color: colors.textSecondary },
-  body: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  captionInput: {
-    minHeight: 180,
-    fontSize: 18,
-    fontWeight: '500',
-    color: colors.textPrimary,
-    lineHeight: 26,
-    paddingTop: 4,
-  },
-  mediaGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 16,
-    marginHorizontal: -6,
-  },
-  mediaTile: {
-    width: '25%',
-    aspectRatio: 1,
-    marginVertical: 6,
-    paddingHorizontal: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mediaTilePressed: { opacity: 0.7 },
-  mediaLabel: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: 6,
-  },
-  footer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonPressed: { backgroundColor: colors.primaryPressed },
-  primaryButtonDisabled: { opacity: 0.5 },
-  primaryButtonText: {
-    ...typography.button,
-    color: '#FFFFFF',
-  },
-});

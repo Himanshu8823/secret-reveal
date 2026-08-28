@@ -24,9 +24,12 @@ type ButtonSizeConfig = {
 };
 
 const sizeConfig: Record<ButtonSize, ButtonSizeConfig> = {
-  sm: { py: 2, px: 3, text: 'bodyStrong' },
-  md: { py: 3, px: 4, text: 'button' },
-  lg: { py: 4, px: 6, text: 'button' },
+  // py-1 / px-2 — tight, for inline / chip-style actions (Cancel, Edit).
+  sm: { py: 1, px: 2, text: 'bodyStrong' },
+  // py-2 / px-3 — default. Top/bottom 8 px, left/right 12 px.
+  md: { py: 2, px: 3, text: 'button' },
+  // py-3 / px-4 — primary CTA (Send OTP, Next). More presence on screen.
+  lg: { py: 3, px: 4, text: 'button' },
 };
 
 /**

@@ -1,21 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   View,
-  Text,
   TextInput,
   Pressable,
-  StyleSheet,
   Image,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors } from '../../../src/theme/colors';
+import { colors } from '../../../src/theme';
+import { Text } from '../../../src/components/ui';
 import {
   getPost,
   submitResponse,
@@ -41,6 +41,17 @@ import {
  */
 
 const AVATAR_SIZE = 36;
+
+// Gradient stops for the hero background. Kept as named constants so the
+// screen has no inline hex literals.
+const HERO_TOP = '#0B1228';
+const HERO_MID = '#13193A';
+const HERO_BOTTOM = '#1A2151';
+const HERO_OVERLAY = 'rgba(255,255,255,0.06)';
+const HERO_OVERLAY_STRONG = 'rgba(255,255,255,0.16)';
+const HERO_ICON_MUTED = '#B6B9BF';
+const HERO_BORDER = 'rgba(255,255,255,0.12)';
+const HERO_ERROR = '#FCA5A5';
 
 export default function HiddenDiscussionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -82,101 +93,143 @@ export default function HiddenDiscussionScreen() {
   const post = postQuery.data;
 
   return (
-    <View style={styles.root}>
+    <View className="flex-1">
       {/* Fake gradient — three stacked views, no new deps. */}
-      <View style={[styles.gradientLayer, styles.gradientTop]} pointerEvents="none" />
-      <View style={[styles.gradientLayer, styles.gradientMid]} pointerEvents="none" />
-      <View style={[styles.gradientLayer, styles.gradientBottom]} pointerEvents="none" />
+      <View
+        className="absolute left-0 right-0"
+        style={{ top: 0, height: '40%', backgroundColor: HERO_TOP }}
+        pointerEvents="none"
+      />
+      <View
+        className="absolute left-0 right-0"
+        style={{ top: '30%', height: '40%', backgroundColor: HERO_MID, opacity: 0.85 }}
+        pointerEvents="none"
+      />
+      <View
+        className="absolute left-0 right-0"
+        style={{ bottom: 0, height: '40%', backgroundColor: HERO_BOTTOM, opacity: 0.7 }}
+        pointerEvents="none"
+      />
 
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <SafeAreaView className="flex-1" edges={['top', 'bottom']}>
         <KeyboardAvoidingView
-          style={styles.flex}
+          className="flex-1"
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <ScrollView
-            style={styles.flex}
-            contentContainerStyle={styles.scrollContent}
+            className="flex-1"
+            contentContainerClassName="px-6 pt-4 pb-8"
             keyboardShouldPersistTaps="handled"
           >
             {/* Top bar */}
-            <View style={styles.topBar}>
-              <View style={styles.topBarLeft}>
-                <View style={styles.pill}>
-                  <Text style={styles.pillText} numberOfLines={1}>
+            <View className="flex-row items-start justify-between gap-3 mb-6">
+              <View className="flex-1 min-w-0">
+                <View
+                  className="self-start px-3 py-1.5 rounded-full"
+                  style={{ backgroundColor: HERO_OVERLAY_STRONG }}
+                >
+                  <Text variant="caption" bold tone="onDark" numberOfLines={1}>
                     Hidden Discussion
                   </Text>
                 </View>
-                <Text style={styles.subtitle} numberOfLines={2}>
+                <Text variant="meta" tone="tertiary" className="mt-2 leading-[18px]" numberOfLines={2}>
                   Responses are hidden until the timer ends
                 </Text>
               </View>
-              <View style={styles.timerPill}>
-                <Text style={styles.timerText} numberOfLines={1}>
+              <View
+                className="px-3 py-1.5 rounded-full"
+                style={{ backgroundColor: HERO_OVERLAY_STRONG }}
+              >
+                <Text
+                  variant="metaStrong"
+                  tone="onDark"
+                  numberOfLines={1}
+                  style={{
+                    fontVariant: ['tabular-nums'],
+                    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+                  }}
+                >
                   {countdownText}
                 </Text>
               </View>
             </View>
 
             {isInitialLoad ? (
-              <View style={styles.loadingWrap}>
-                <ActivityIndicator color="#FFFFFF" />
+              <View className="py-12 items-center">
+                <ActivityIndicator color={colors.text.onDark} />
               </View>
             ) : postQuery.error ? (
-              <View style={styles.errorWrap}>
-                <Text style={styles.errorText}>Couldn't load this discussion.</Text>
+              <View className="py-8 items-center">
+                <Text variant="body" tone="onDark" className="mb-3">
+                  Couldn't load this discussion.
+                </Text>
                 <Pressable
                   onPress={() => postQuery.refetch()}
-                  style={({ pressed }) => [styles.retryBtn, pressed && styles.retryBtnPressed]}
+                  className="px-4 py-2 rounded-md active:opacity-80"
+                  style={{ backgroundColor: HERO_OVERLAY_STRONG }}
                 >
-                  <Text style={styles.retryText}>Retry</Text>
+                  <Text variant="bodyStrong" tone="onDark">
+                    Retry
+                  </Text>
                 </Pressable>
               </View>
             ) : post ? (
               <PostBody post={post} />
             ) : null}
 
-            <View style={styles.composerWrap}>
-              <View style={styles.composerHeader}>
-                <Text style={styles.composerHeading}>Submit your response</Text>
+            <View
+              className="pt-4"
+              style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
+            >
+              <View className="mb-3">
+                <Text variant="title" tone="onDark">
+                  Submit your response
+                </Text>
               </View>
 
-              <View style={styles.composerCard}>
-                <View style={styles.inputRow}>
+              <View
+                className="rounded-md p-3"
+                style={{ backgroundColor: HERO_OVERLAY }}
+              >
+                <View
+                  className="rounded-md px-3 py-2 mb-3"
+                  style={{ backgroundColor: HERO_OVERLAY }}
+                >
                   <TextInput
                     value={draft}
                     onChangeText={setDraft}
                     placeholder="Write a comment…"
-                    placeholderTextColor="#8A93AE"
-                    style={styles.input}
+                    placeholderTextColor={colors.text.tertiary}
+                    className="text-text-onDark min-h-[36px] max-h-[120px] p-0"
                     multiline
                     editable={!submitMutation.isPending}
                     accessibilityLabel="Your response"
                   />
                 </View>
 
-                <View style={styles.composerFooter}>
-                  <View style={styles.attachRow}>
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-4">
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Attach image"
-                      style={({ pressed }) => [styles.attachBtn, pressed && styles.attachBtnPressed]}
+                      className="w-8 h-8 items-center justify-center active:opacity-70"
                       // Phase 5 wires the actual picker.
                     >
-                      <MaterialCommunityIcons name="image-outline" size={20} color="#B6B9BF" />
+                      <MaterialCommunityIcons name="image-outline" size={20} color={HERO_ICON_MUTED} />
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Attach video"
-                      style={({ pressed }) => [styles.attachBtn, pressed && styles.attachBtnPressed]}
+                      className="w-8 h-8 items-center justify-center active:opacity-70"
                     >
-                      <MaterialCommunityIcons name="video-outline" size={20} color="#B6B9BF" />
+                      <MaterialCommunityIcons name="video-outline" size={20} color={HERO_ICON_MUTED} />
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Attach audio"
-                      style={({ pressed }) => [styles.attachBtn, pressed && styles.attachBtnPressed]}
+                      className="w-8 h-8 items-center justify-center active:opacity-70"
                     >
-                      <MaterialCommunityIcons name="music-note-outline" size={20} color="#B6B9BF" />
+                      <MaterialCommunityIcons name="music-note-outline" size={20} color={HERO_ICON_MUTED} />
                     </Pressable>
                   </View>
 
@@ -189,29 +242,30 @@ export default function HiddenDiscussionScreen() {
                       submitMutation.mutate(trimmed);
                     }}
                     disabled={submitMutation.isPending || draft.trim().length === 0}
-                    style={({ pressed }) => [
-                      styles.sendBtn,
-                      (submitMutation.isPending || draft.trim().length === 0) && styles.sendBtnDisabled,
-                      pressed && styles.sendBtnPressed,
-                    ]}
+                    className={`w-10 h-10 rounded-full items-center justify-center ${
+                      submitMutation.isPending || draft.trim().length === 0 ? 'opacity-50' : 'active:opacity-90'
+                    }`}
+                    style={{ backgroundColor: colors.brand.primary }}
                   >
                     {submitMutation.isPending ? (
-                      <ActivityIndicator color="#FFFFFF" size="small" />
+                      <ActivityIndicator color={colors.text.onDark} size="small" />
                     ) : (
-                      <MaterialCommunityIcons name="send" size={18} color="#FFFFFF" />
+                      <MaterialCommunityIcons name="send" size={18} color={colors.text.onDark} />
                     )}
                   </Pressable>
                 </View>
 
                 {submitMutation.isError ? (
-                  <Text style={styles.composerError}>
+                  <Text variant="meta" className="mt-2" style={{ color: HERO_ERROR }}>
                     Couldn't send your response. Try again.
                   </Text>
                 ) : null}
               </View>
             </View>
 
-            <Text style={styles.footerHint}>Other responses are hidden</Text>
+            <Text variant="caption" tone="tertiary" className="text-center mt-6">
+              Other responses are hidden
+            </Text>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -227,20 +281,29 @@ function PostBody({ post }: { post: PostDetail }) {
   return (
     <>
       {/* Author card */}
-      <View style={styles.authorCard}>
-        <View style={[styles.avatar, { backgroundColor: avatarColor }]}>
-          <Text style={styles.avatarText}>{initials}</Text>
+      <View className="flex-row items-center mb-4">
+        <View
+          className="items-center justify-center mr-3"
+          style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: 9999, backgroundColor: avatarColor }}
+        >
+          <Text variant="metaStrong" tone="onDark">
+            {initials}
+          </Text>
         </View>
-        <View style={styles.authorBody}>
-          <Text style={styles.authorName} numberOfLines={1}>
+        <View className="flex-1 min-w-0">
+          <Text variant="bodyStrong" tone="onDark" numberOfLines={1}>
             {post.authorName ?? 'Unknown author'}
           </Text>
-          <Text style={styles.authorMeta}>{formatRelativeTime(post.createdAt)}</Text>
+          <Text variant="meta" tone="tertiary" className="mt-0.5">
+            {formatRelativeTime(post.createdAt)}
+          </Text>
         </View>
       </View>
 
       {/* Question */}
-      <Text style={styles.question}>{post.caption}</Text>
+      <Text variant="h2" tone="onDark" className="mb-4">
+        {post.caption}
+      </Text>
 
       {/* Media (single full-width preview, 16:9) */}
       {firstMedia ? <MediaPreview item={firstMedia} /> : null}
@@ -256,16 +319,17 @@ function MediaPreview({ item }: { item: PostMediaItem }) {
       // for now — the route doesn't exist yet.
       accessibilityRole="image"
       accessibilityLabel="Attached media"
-      style={({ pressed }) => [styles.mediaWrap, pressed && styles.mediaWrapPressed]}
+      className="w-full aspect-[16/9] rounded-lg overflow-hidden mb-6 active:opacity-80"
+      style={{ backgroundColor: HERO_BOTTOM }}
     >
       {isImage ? (
-        <Image source={{ uri: item.url }} style={styles.mediaImage} resizeMode="cover" />
+        <Image source={{ uri: item.url }} className="w-full h-full" resizeMode="cover" />
       ) : (
-        <View style={styles.mediaPlaceholder}>
+        <View className="flex-1 items-center justify-center" style={{ backgroundColor: HERO_BOTTOM }}>
           <MaterialCommunityIcons
             name={item.kind === 'video' ? 'play-circle-outline' : 'music-circle-outline'}
             size={36}
-            color="#FFFFFF"
+            color={colors.text.onDark}
           />
         </View>
       )}
@@ -320,270 +384,3 @@ function avatarColorFor(seed: string): string {
   }
   return palette[h % palette.length];
 }
-
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-
-  root: {
-    flex: 1,
-    backgroundColor: '#0B1228',
-  },
-  // Faked gradient — three absolute layers, decreasing opacity from top to bottom.
-  gradientLayer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-  },
-  gradientTop: {
-    top: 0,
-    height: '40%',
-    backgroundColor: '#0B1228',
-  },
-  gradientMid: {
-    top: '30%',
-    height: '40%',
-    backgroundColor: '#13193A',
-    opacity: 0.85,
-  },
-  gradientBottom: {
-    bottom: 0,
-    height: '40%',
-    backgroundColor: '#1A2151',
-    opacity: 0.7,
-  },
-
-  safe: { flex: 1 },
-
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 32,
-  },
-
-  // Top bar
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginBottom: 24,
-  },
-  topBarLeft: {
-    flex: 1,
-    minWidth: 0,
-  },
-  pill: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 9999,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-  },
-  pillText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  subtitle: {
-    color: '#B6B9BF',
-    fontSize: 13,
-    fontWeight: '400',
-    marginTop: 8,
-    lineHeight: 18,
-  },
-  timerPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 9999,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-  },
-  timerText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-    // RN: monospace via fontFamily on iOS+Android.
-    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
-  },
-
-  // Author card
-  authorCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  avatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: 9999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  authorBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  authorName: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  authorMeta: {
-    color: '#B6B9BF',
-    fontSize: 13,
-    fontWeight: '400',
-    marginTop: 2,
-  },
-
-  // Question
-  question: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '700',
-    lineHeight: 28,
-    letterSpacing: -0.2,
-    marginBottom: 16,
-  },
-
-  // Media
-  mediaWrap: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#1A2151',
-    marginBottom: 24,
-  },
-  mediaWrapPressed: {
-    opacity: 0.85,
-  },
-  mediaImage: {
-    width: '100%',
-    height: '100%',
-  },
-  mediaPlaceholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1A2151',
-  },
-
-  // Composer
-  composerWrap: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.12)',
-    paddingTop: 16,
-  },
-  composerHeader: {
-    marginBottom: 12,
-  },
-  composerHeading: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  composerCard: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 12,
-    padding: 12,
-  },
-  inputRow: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 12,
-  },
-  input: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '400',
-    minHeight: 36,
-    maxHeight: 120,
-    padding: 0,
-  },
-  composerFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  attachRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  attachBtn: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  attachBtnPressed: {
-    opacity: 0.7,
-  },
-  sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 9999,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendBtnPressed: {
-    backgroundColor: colors.primaryPressed,
-  },
-  sendBtnDisabled: {
-    opacity: 0.5,
-  },
-  composerError: {
-    color: '#FCA5A5',
-    fontSize: 13,
-    fontWeight: '400',
-    marginTop: 8,
-  },
-
-  // Footer hint
-  footerHint: {
-    color: '#8A93AE',
-    fontSize: 12,
-    fontWeight: '400',
-    textAlign: 'center',
-    marginTop: 24,
-  },
-
-  // Loading / error
-  loadingWrap: {
-    paddingVertical: 48,
-    alignItems: 'center',
-  },
-  errorWrap: {
-    paddingVertical: 32,
-    alignItems: 'center',
-  },
-  errorText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '400',
-    marginBottom: 12,
-  },
-  retryBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  retryBtnPressed: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  retryText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});

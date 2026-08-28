@@ -99,7 +99,7 @@ export const Input = forwardRef<TextInput, InputProps>(function Input(
             onBlur?.(e);
           }}
           className={[
-            'flex-1 py-3 text-text-primary',
+            'flex-1 py-2 text-text-primary',
             editable ? '' : 'opacity-60',
             className,
           ]
