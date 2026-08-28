@@ -20,6 +20,16 @@ const envSchema = z.object({
 
   APP_NAME: z.string().min(1).default('Secretsuper'),
 
+  // Bloom filter sizing for username uniqueness front-line check.
+  // The bloom filter is a Redis-backed probabilistic structure that
+  // catches "obviously taken" usernames in sub-ms before we hit Postgres
+  // UNIQUE. Postgres UNIQUE remains the authoritative source of truth —
+  // the bloom filter is only an optimization, never an authority.
+  // Sizing math (https://hur.st/bloomfilter/): capacity=1M, error=0.01
+  // gives ~9.59M bits (~1.14 MB) and 7 hash functions.
+  BLOOM_CAPACITY: z.coerce.number().int().positive().default(1_000_000),
+  BLOOM_ERROR_RATE: z.coerce.number().positive().max(0.1).default(0.01),
+
   // Comma-separated allowlist. Empty list => no browser origins allowed.
   CORS_ORIGINS: z
     .string()

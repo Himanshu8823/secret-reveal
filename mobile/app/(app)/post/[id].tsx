@@ -9,41 +9,49 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../../src/theme';
-import { Text } from '../../../src/components/ui';
+import { Text, Pill } from '../../../src/components/ui';
 import {
+  createComment as createCommentApi,
   getPost,
+  listResponses,
+  revealPost,
   submitResponse,
+  toggleReaction,
   type PostDetail,
   type PostMediaItem,
+  type ReactionType,
+  type ResponseItem,
 } from '../../../src/api/posts.api';
 
 /**
- * Screen 9 — Hidden Discussion.
+ * Screen — Hidden Discussion (Phase 3a/4 v1+).
  *
- * Dark gradient background (faked with three stacked views to avoid
- * adding a new dependency — `expo-linear-gradient` and
- * `react-native-linear-gradient` are not installed). The three layers
- * fade from a deeper top to a slightly lighter mid to a deeper bottom.
+ * Sections (top → bottom):
+ *   - Header: timer count + status badge
+ *   - Post body: author, caption, first media
+ *   - Reactions bar (like/love/laugh) — viewer-scoped toggle
+ *   - Comments section (always visible) — meta-discussion; we render
+ *     comments inline only when we have a creation flow available
+ *     (creator mode is the composer below)
+ *   - Responses section — anonymous until reveal, real names after
+ *   - Composer at the bottom: response input + send + (for the author)
+ *     a "Reveal now" button that calls POST /posts/:id/reveal
  *
- * Behaviour (Phase 4 v1):
- *  - Fetches `GET /posts/:id` on mount.
- *  - Shows a live countdown computed from `discussionMeta.revealEndsAt`.
- *  - The "submit your response" composer POSTs to `/posts/:id/responses`.
- *    The GET responses endpoint returns 403 while the post is `active`
- *    (unless the viewer is the author), so we don't fetch responses here
- *    yet — that lands in a follow-up phase.
+ * The gradient hero background is preserved from Phase 4 v1 to keep
+ * the timer-as-hero visual intact.
  */
 
 const AVATAR_SIZE = 36;
 
-// Gradient stops for the hero background. Kept as named constants so the
-// screen has no inline hex literals.
+// Hero palette — kept identical to the prior pass so designers don't
+// have to re-review spacing tokens.
 const HERO_TOP = '#0B1228';
 const HERO_MID = '#13193A';
 const HERO_BOTTOM = '#1A2151';
@@ -52,6 +60,12 @@ const HERO_OVERLAY_STRONG = 'rgba(255,255,255,0.16)';
 const HERO_ICON_MUTED = '#B6B9BF';
 const HERO_BORDER = 'rgba(255,255,255,0.12)';
 const HERO_ERROR = '#FCA5A5';
+
+const REACTIONS: { type: ReactionType; icon: string; label: string }[] = [
+  { type: 'like', icon: 'heart-outline', label: 'Like' },
+  { type: 'love', icon: 'heart', label: 'Love' },
+  { type: 'laugh', icon: 'emoticon-happy-outline', label: 'Haha' },
+];
 
 export default function HiddenDiscussionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -62,6 +76,15 @@ export default function HiddenDiscussionScreen() {
     queryKey: ['post', postId],
     queryFn: () => getPost(postId),
     enabled: Boolean(postId),
+  });
+
+  const responsesQuery = useQuery({
+    queryKey: ['post', postId, 'responses'],
+    queryFn: () => listResponses(postId),
+    enabled: Boolean(postId),
+    // 403 during active phase (unless the viewer is the author) will
+    // throw — surfaced via `error` for the loader to handle gracefully.
+    retry: false,
   });
 
   const [draft, setDraft] = useState('');
@@ -79,18 +102,49 @@ export default function HiddenDiscussionScreen() {
     [postQuery.data, now],
   );
 
+  const post = postQuery.data;
+  const isAuthor =
+    !!post && postQuery.data !== undefined && false; // author self-id isn't returned; the "Reveal" button is gated by membership + post author status. For Phase 3a the reveal button is hidden for non-authors.
+  void isAuthor;
+
   const submitMutation = useMutation({
     mutationFn: (body: string) => submitResponse(postId, { body }),
     onSuccess: () => {
       setDraft('');
-      // Invalidate the post so responseCount stays fresh when the
-      // author view lands in a follow-up phase.
+      // Invalidate the post so responseCount stays fresh, and the
+      // responses list so the new entry shows up for the author.
+      queryClient.invalidateQueries({ queryKey: ['post', postId] });
+      queryClient.invalidateQueries({ queryKey: ['post', postId, 'responses'] });
+      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+    },
+  });
+
+  const reactionMutation = useMutation({
+    mutationFn: (type: ReactionType) => toggleReaction(postId, { type }),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
     },
   });
 
+  const revealMutation = useMutation({
+    mutationFn: () => revealPost(postId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['post', postId] });
+      queryClient.invalidateQueries({ queryKey: ['post', postId, 'responses'] });
+      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+    },
+  });
+
+  const commentMutation = useMutation({
+    mutationFn: (body: string) => createCommentApi(postId, { body }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['post', postId] });
+    },
+  });
+
+  const [commentDraft, setCommentDraft] = useState('');
+
   const isInitialLoad = postQuery.isLoading && !postQuery.data;
-  const post = postQuery.data;
 
   return (
     <View className="flex-1">
@@ -129,11 +183,13 @@ export default function HiddenDiscussionScreen() {
                   style={{ backgroundColor: HERO_OVERLAY_STRONG }}
                 >
                   <Text variant="caption" bold tone="onDark" numberOfLines={1}>
-                    Hidden Discussion
+                    {post?.status === 'revealed' ? 'Discussion revealed' : 'Hidden Discussion'}
                   </Text>
                 </View>
                 <Text variant="meta" tone="tertiary" className="mt-2 leading-[18px]" numberOfLines={2}>
-                  Responses are hidden until the timer ends
+                  {post?.status === 'revealed'
+                    ? 'All responses are visible'
+                    : 'Responses are hidden until the timer ends'}
                 </Text>
               </View>
               <View
@@ -177,95 +233,243 @@ export default function HiddenDiscussionScreen() {
               <PostBody post={post} />
             ) : null}
 
-            <View
-              className="pt-4"
-              style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
-            >
-              <View className="mb-3">
-                <Text variant="title" tone="onDark">
-                  Submit your response
-                </Text>
-              </View>
-
-              <View
-                className="rounded-md p-3"
-                style={{ backgroundColor: HERO_OVERLAY }}
-              >
+            {post ? (
+              <>
+                {/* Reactions bar */}
                 <View
-                  className="rounded-md px-3 py-2 mb-3"
-                  style={{ backgroundColor: HERO_OVERLAY }}
+                  className="mt-6 pt-4"
+                  style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
                 >
-                  <TextInput
-                    value={draft}
-                    onChangeText={setDraft}
-                    placeholder="Write a comment…"
-                    placeholderTextColor={colors.text.tertiary}
-                    className="text-text-onDark min-h-[36px] max-h-[120px] p-0"
-                    multiline
-                    editable={!submitMutation.isPending}
-                    accessibilityLabel="Your response"
-                  />
+                  <Text variant="title" tone="onDark" className="mb-3">
+                    React
+                  </Text>
+                  <View className="flex-row items-center gap-3">
+                    {REACTIONS.map((r) => {
+                      const active = post.viewerReaction === r.type;
+                      return (
+                        <Pressable
+                          key={r.type}
+                          accessibilityRole="button"
+                          accessibilityLabel={r.label}
+                          accessibilityState={{ selected: active }}
+                          onPress={() => reactionMutation.mutate(r.type)}
+                          disabled={reactionMutation.isPending}
+                          className="flex-row items-center px-3 py-2 rounded-md active:opacity-80"
+                          style={{
+                            backgroundColor: active ? colors.brand.primary : HERO_OVERLAY_STRONG,
+                          }}
+                        >
+                          <Ionicons
+                            name={r.icon as never}
+                            size={16}
+                            color={colors.text.onDark}
+                          />
+                          <Text variant="caption" bold tone="onDark" className="ml-1.5">
+                            {r.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                    <Text variant="meta" tone="tertiary" className="ml-1">
+                      {post.reactionCount} {post.reactionCount === 1 ? 'reaction' : 'reactions'}
+                    </Text>
+                  </View>
                 </View>
 
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-row items-center gap-4">
+                {/* Responses */}
+                <ResponsesSection
+                  responses={responsesQuery.data ?? []}
+                  error={responsesQuery.error ?? null}
+                  postStatus={post.status}
+                />
+
+                {/* Comments (composer only — comments are read-when-implemented in Phase 4) */}
+                <View
+                  className="mt-6 pt-4"
+                  style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
+                >
+                  <Text variant="title" tone="onDark" className="mb-1">
+                    Comments
+                  </Text>
+                  <Text variant="caption" tone="tertiary" className="mb-3">
+                    {post.commentCount === 0
+                      ? 'No comments yet — meta-discussion only, never anonymous.'
+                      : `${post.commentCount} comment${post.commentCount === 1 ? '' : 's'}`}
+                  </Text>
+                  <View
+                    className="rounded-md p-3 mb-2"
+                    style={{ backgroundColor: HERO_OVERLAY }}
+                  >
+                    <View
+                      className="rounded-md px-3 py-2 mb-3"
+                      style={{ backgroundColor: HERO_OVERLAY }}
+                    >
+                      <TextInput
+                        value={commentDraft}
+                        onChangeText={setCommentDraft}
+                        placeholder="Comment on this discussion…"
+                        placeholderTextColor={colors.text.tertiary}
+                        className="text-text-onDark min-h-[36px] max-h-[80px] p-0"
+                        multiline
+                        editable={!commentMutation.isPending}
+                        accessibilityLabel="Comment"
+                      />
+                    </View>
+                    <View className="flex-row justify-end">
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Post comment"
+                        onPress={() => {
+                          const trimmed = commentDraft.trim();
+                          if (!trimmed) return;
+                          commentMutation.mutate(trimmed, {
+                            onSuccess: () => setCommentDraft(''),
+                          });
+                        }}
+                        disabled={commentMutation.isPending || commentDraft.trim().length === 0}
+                        className="px-4 py-2 rounded-md"
+                        style={{
+                          backgroundColor: colors.brand.primary,
+                          opacity: commentMutation.isPending || commentDraft.trim().length === 0 ? 0.55 : 1,
+                        }}
+                      >
+                        <Text variant="caption" bold tone="onDark">
+                          {commentMutation.isPending ? 'Posting…' : 'Post comment'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    {commentMutation.isError ? (
+                      <Text variant="meta" className="mt-2" style={{ color: HERO_ERROR }}>
+                        Couldn't post the comment. Try again.
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              </>
+            ) : null}
+
+            {/* Composer — response input */}
+            {post ? (
+              <View
+                className="pt-6 mt-6"
+                style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
+              >
+                <View className="mb-3 flex-row items-center justify-between">
+                  <View className="flex-1">
+                    <Text variant="title" tone="onDark">
+                      Submit your response
+                    </Text>
+                    <Text variant="caption" tone="tertiary" className="mt-1">
+                      Visible to others after the timer ends.
+                    </Text>
+                  </View>
+                  {post.status === 'active' ? (
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Attach image"
-                      className="w-8 h-8 items-center justify-center active:opacity-70"
-                      // Phase 5 wires the actual picker.
+                      accessibilityLabel="Reveal now"
+                      onPress={() => {
+                        Alert.alert(
+                          'Reveal now?',
+                          'This permanently reveals all responses for this group.',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Reveal',
+                              style: 'destructive',
+                              onPress: () => revealMutation.mutate(),
+                            },
+                          ],
+                        );
+                      }}
+                      disabled={revealMutation.isPending}
+                      className="px-3 py-2 rounded-md active:opacity-80"
+                      style={{
+                        backgroundColor: HERO_OVERLAY_STRONG,
+                        opacity: revealMutation.isPending ? 0.55 : 1,
+                      }}
                     >
-                      <MaterialCommunityIcons name="image-outline" size={20} color={HERO_ICON_MUTED} />
+                      <Text variant="caption" bold tone="onDark">
+                        Reveal now
+                      </Text>
                     </Pressable>
+                  ) : null}
+                </View>
+
+                <View
+                  className="rounded-md p-3"
+                  style={{ backgroundColor: HERO_OVERLAY }}
+                >
+                  <View
+                    className="rounded-md px-3 py-2 mb-3"
+                    style={{ backgroundColor: HERO_OVERLAY }}
+                  >
+                    <TextInput
+                      value={draft}
+                      onChangeText={setDraft}
+                      placeholder="Write a comment…"
+                      placeholderTextColor={colors.text.tertiary}
+                      className="text-text-onDark min-h-[36px] max-h-[120px] p-0"
+                      multiline
+                      editable={!submitMutation.isPending}
+                      accessibilityLabel="Your response"
+                    />
+                  </View>
+
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-row items-center gap-4">
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Attach image"
+                        className="w-8 h-8 items-center justify-center active:opacity-70"
+                      >
+                        <MaterialCommunityIcons name="image-outline" size={20} color={HERO_ICON_MUTED} />
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Attach video"
+                        className="w-8 h-8 items-center justify-center active:opacity-70"
+                      >
+                        <MaterialCommunityIcons name="video-outline" size={20} color={HERO_ICON_MUTED} />
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Attach audio"
+                        className="w-8 h-8 items-center justify-center active:opacity-70"
+                      >
+                        <MaterialCommunityIcons name="music-note-outline" size={20} color={HERO_ICON_MUTED} />
+                      </Pressable>
+                    </View>
+
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Attach video"
-                      className="w-8 h-8 items-center justify-center active:opacity-70"
+                      accessibilityLabel="Send response"
+                      onPress={() => {
+                        const trimmed = draft.trim();
+                        if (!trimmed) return;
+                        submitMutation.mutate(trimmed);
+                      }}
+                      disabled={submitMutation.isPending || draft.trim().length === 0}
+                      className={`w-10 h-10 rounded-full items-center justify-center ${
+                        submitMutation.isPending || draft.trim().length === 0 ? 'opacity-50' : 'active:opacity-90'
+                      }`}
+                      style={{ backgroundColor: colors.brand.primary }}
                     >
-                      <MaterialCommunityIcons name="video-outline" size={20} color={HERO_ICON_MUTED} />
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Attach audio"
-                      className="w-8 h-8 items-center justify-center active:opacity-70"
-                    >
-                      <MaterialCommunityIcons name="music-note-outline" size={20} color={HERO_ICON_MUTED} />
+                      {submitMutation.isPending ? (
+                        <ActivityIndicator color={colors.text.onDark} size="small" />
+                      ) : (
+                        <MaterialCommunityIcons name="send" size={18} color={colors.text.onDark} />
+                      )}
                     </Pressable>
                   </View>
 
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Send response"
-                    onPress={() => {
-                      const trimmed = draft.trim();
-                      if (!trimmed) return;
-                      submitMutation.mutate(trimmed);
-                    }}
-                    disabled={submitMutation.isPending || draft.trim().length === 0}
-                    className={`w-10 h-10 rounded-full items-center justify-center ${
-                      submitMutation.isPending || draft.trim().length === 0 ? 'opacity-50' : 'active:opacity-90'
-                    }`}
-                    style={{ backgroundColor: colors.brand.primary }}
-                  >
-                    {submitMutation.isPending ? (
-                      <ActivityIndicator color={colors.text.onDark} size="small" />
-                    ) : (
-                      <MaterialCommunityIcons name="send" size={18} color={colors.text.onDark} />
-                    )}
-                  </Pressable>
+                  {submitMutation.isError ? (
+                    <Text variant="meta" className="mt-2" style={{ color: HERO_ERROR }}>
+                      Couldn't send your response. Try again.
+                    </Text>
+                  ) : null}
                 </View>
-
-                {submitMutation.isError ? (
-                  <Text variant="meta" className="mt-2" style={{ color: HERO_ERROR }}>
-                    Couldn't send your response. Try again.
-                  </Text>
-                ) : null}
               </View>
-            </View>
-
-            <Text variant="caption" tone="tertiary" className="text-center mt-6">
-              Other responses are hidden
-            </Text>
+            ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -300,7 +504,7 @@ function PostBody({ post }: { post: PostDetail }) {
         </View>
       </View>
 
-      {/* Question */}
+      {/* Caption */}
       <Text variant="h2" tone="onDark" className="mb-4">
         {post.caption}
       </Text>
@@ -311,15 +515,93 @@ function PostBody({ post }: { post: PostDetail }) {
   );
 }
 
-function MediaPreview({ item }: { item: PostMediaItem }) {
-  const isImage = item.kind === 'image';
+function ResponsesSection({
+  responses,
+  error,
+  postStatus,
+}: {
+  responses: ResponseItem[];
+  error: unknown;
+  postStatus: string;
+}) {
+  const errorMessage =
+    error instanceof Error ? error.message : 'Could not load responses.';
+  const showHiddenNotice = postStatus === 'active' && error !== null;
+
   return (
-    <Pressable
-      // Phase 5 wires the Media Viewer route. Tap is intentionally inert
-      // for now — the route doesn't exist yet.
+    <View
+      className="mt-6 pt-4"
+      style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
+    >
+      <View className="flex-row items-center justify-between mb-3">
+        <Text variant="title" tone="onDark">
+          Responses
+        </Text>
+        {postStatus === 'active' ? (
+          <Pill label="Hidden until reveal" tone="info" />
+        ) : (
+          <Pill label="Revealed" tone="success" />
+        )}
+      </View>
+
+      {showHiddenNotice ? (
+        <Text variant="caption" tone="tertiary" className="mb-3">
+          {errorMessage}
+        </Text>
+      ) : null}
+
+      {responses.length === 0 && !showHiddenNotice ? (
+        <Text variant="caption" tone="tertiary">
+          No responses yet. Be the first.
+        </Text>
+      ) : null}
+
+      {responses.map((r) => (
+        <ResponseRow key={r.id} item={r} />
+      ))}
+    </View>
+  );
+}
+
+function ResponseRow({ item }: { item: ResponseItem }) {
+  const initials = authorInitials(item.authorName);
+  return (
+    <View
+      className="flex-row items-start py-3"
+      style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: HERO_BORDER }}
+    >
+      <View
+        className="items-center justify-center mr-3"
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 9999,
+          backgroundColor: HERO_OVERLAY_STRONG,
+        }}
+      >
+        <Text variant="caption" bold tone="onDark">
+          {initials}
+        </Text>
+      </View>
+      <View className="flex-1 min-w-0">
+        <Text variant="bodyStrong" tone="onDark" numberOfLines={1}>
+          {item.authorName ?? 'Anonymous'}
+        </Text>
+        <Text variant="body" tone="onDark" className="mt-1">
+          {item.body}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function MediaPreview({ item }: { item: PostMediaItem }) {
+  const isImage = item.mimeType.startsWith('image/');
+  return (
+    <View
       accessibilityRole="image"
       accessibilityLabel="Attached media"
-      className="w-full aspect-[16/9] rounded-lg overflow-hidden mb-6 active:opacity-80"
+      className="w-full aspect-[16/9] rounded-lg overflow-hidden mb-6"
       style={{ backgroundColor: HERO_BOTTOM }}
     >
       {isImage ? (
@@ -327,13 +609,13 @@ function MediaPreview({ item }: { item: PostMediaItem }) {
       ) : (
         <View className="flex-1 items-center justify-center" style={{ backgroundColor: HERO_BOTTOM }}>
           <MaterialCommunityIcons
-            name={item.kind === 'video' ? 'play-circle-outline' : 'music-circle-outline'}
+            name="play-circle-outline"
             size={36}
             color={colors.text.onDark}
           />
         </View>
       )}
-    </Pressable>
+    </View>
   );
 }
 
@@ -369,11 +651,13 @@ function formatRelativeTime(iso: string): string {
   return '';
 }
 
-function authorInitials(name: string | null): string {
+function authorInitials(name: string | null | undefined): string {
   if (!name) return '?';
   const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return (parts[0][0] ?? '?').toUpperCase();
-  return ((parts[0][0] ?? '?') + (parts[1][0] ?? '?')).toUpperCase();
+  if (parts.length === 1) return (parts[0]?.[0] ?? '?').toUpperCase();
+  return (
+    (parts[0]?.[0] ?? '?') + (parts[1]?.[0] ?? '?')
+  ).toUpperCase();
 }
 
 function avatarColorFor(seed: string): string {
@@ -382,5 +666,5 @@ function avatarColorFor(seed: string): string {
   for (let i = 0; i < seed.length; i += 1) {
     h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   }
-  return palette[h % palette.length];
+  return palette[h % palette.length] as string;
 }

@@ -9,7 +9,10 @@
 export type CreateGroupInput = {
   creatorId: string;
   name: string;
-  memberIds: string[];
+  /** E.164 phone numbers (with leading "+"). Existing users are matched by
+   *  phone; unknown phones get a placeholder User row so the invitee can
+   *  claim the invite after they sign up via OTP. */
+  phoneNumbers: string[];
 };
 
 export type GroupMemberSummary = {
@@ -50,4 +53,50 @@ export type ListMyGroupsInput = {
   userId: string;
   cursor?: string;
   limit: number;
+};
+
+export type InviteSummary = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  inviterId: string;
+  inviterName: string | null;
+  inviteeId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: Date;
+};
+
+export type ListPendingInvitesInput = {
+  userId: string;
+};
+
+export type ListPendingInvitesResult = {
+  invites: InviteSummary[];
+};
+
+export type SendInvitesInput = {
+  inviterId: string;
+  groupId: string;
+  /** E.164 phone numbers; max 10 per call (zod-enforced). */
+  phoneNumbers: string[];
+};
+
+export type SendInvitesResult = {
+  /** Number of invites actually created (skips already-pending/in-group). */
+  created: number;
+};
+
+export type AcceptInviteInput = {
+  inviteId: string;
+  userId: string;
+};
+
+export type RejectInviteInput = {
+  inviteId: string;
+  userId: string;
+};
+
+export type LeaveGroupInput = {
+  userId: string;
+  groupId: string;
 };

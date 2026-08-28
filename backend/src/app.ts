@@ -4,7 +4,7 @@ import cors from 'cors';
 import { env } from './config/env.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { usersRouter } from './modules/users/users.routes.js';
-import { groupsRouter } from './modules/groups/groups.routes.js';
+import { groupsRouter, invitesRouter } from './modules/groups/groups.routes.js';
 import { postsRouter } from './modules/posts/posts.routes.js';
 import { healthRouter } from './modules/health/health.routes.js';
 import { errorHandler } from './middlewares/errorHandler.js';
@@ -93,6 +93,7 @@ export function buildApp() {
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/users', usersRouter);
   app.use('/api/v1/groups', groupsRouter);
+  app.use('/api/v1/invites', invitesRouter);
   app.use('/api/v1/posts', postsRouter);
 
   // Centralized error handling — must be last.

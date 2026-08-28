@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { phoneInputSchema } from '../auth/phone.schema.js';
 
 /**
  * zod schemas for the groups module. Controllers parse with these at the
@@ -10,20 +11,25 @@ import { z } from 'zod';
  */
 
 /**
- * UUID schema — strict, lowercase, dashed form. Prisma stores UUIDs in
- * this canonical form, and the service inserts them into UUID columns.
- * Anything else is rejected here so the service never sees malformed ids.
+ * Phone-number list — shared by `createGroup` and `sendInvites`. The same
+ * rules apply on both: must be valid E.164 (per `phone.schema.ts`), max 10
+ * entries per call (matches the task spec for /invites).
+ *
+ * We dedupe + cap with zod so the service layer can trust uniqueness.
  */
-const uuid = z.string().uuid();
+const phoneListSchema = z
+  .array(phoneInputSchema.transform((p) => p.e164))
+  .max(10, 'At most 10 phone numbers per call')
+  .transform((nums) => Array.from(new Set(nums)))
+  .optional()
+  .default([]);
 
 /**
  * POST /groups body.
  *
  *   - name: 1..60 chars after trim (same rule as User.name for consistency)
- *   - memberIds: array of UUIDs, 0..50 entries
+ *   - phoneNumbers: array of E.164 phones, 0..10 entries
  *
- * We dedupe memberIds inside the schema because the service inserts them
- * as GroupMember PKs; duplicates would cause a DB error after validation.
  * The creator is always added server-side — clients don't pass themselves.
  */
 export const createGroupSchema = z.object({
@@ -39,18 +45,13 @@ export const createGroupSchema = z.object({
           message: 'Name must not contain control characters',
         }),
     ),
-  memberIds: z
-    .array(uuid)
-    .max(50, 'At most 50 members can be added at creation')
-    .transform((ids) => Array.from(new Set(ids)))
-    .optional()
-    .default([]),
+  phoneNumbers: phoneListSchema,
 });
 
 export type CreateGroupBody = z.infer<typeof createGroupSchema>;
 
 /**
- * GET /groups?mine=true query.
+ * GET /groups query.
  *
  *   - cursor: opaque string produced by the server on the previous page;
  *     we don't decode it, just pass it back to Prisma.
@@ -69,3 +70,19 @@ export const listMyGroupsQuery = z.object({
 });
 
 export type ListMyGroupsQuery = z.infer<typeof listMyGroupsQuery>;
+
+/**
+ * POST /groups/:id/invites body.
+ *
+ *   - phoneNumbers: array of E.164 phones, 1..10 entries (required here;
+ *     the create-time list is optional because it might be just "me").
+ */
+export const sendInvitesSchema = z.object({
+  phoneNumbers: z
+    .array(phoneInputSchema.transform((p) => p.e164))
+    .min(1, 'Add at least one phone number')
+    .max(10, 'At most 10 phone numbers per call')
+    .transform((nums) => Array.from(new Set(nums))),
+});
+
+export type SendInvitesBody = z.infer<typeof sendInvitesSchema>;

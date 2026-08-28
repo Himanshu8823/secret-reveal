@@ -82,6 +82,11 @@ export default function AppLayout() {
       <Tabs.Screen name="create" options={{ href: null }} />
       <Tabs.Screen name="group/[id]" options={{ href: null }} />
       <Tabs.Screen name="post/[id]" options={{ href: null }} />
+      {/* Create-group route — same pattern as the post composer. */}
+      <Tabs.Screen name="groups/new" options={{ href: null }} />
+      {/* Profile edit screen — reachable via router.push from the profile
+          tab, but hidden from the tab bar so the menu stays clean. */}
+      <Tabs.Screen name="profile/edit" options={{ href: null }} />
     </Tabs>
   );
 }

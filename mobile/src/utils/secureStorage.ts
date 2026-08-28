@@ -16,6 +16,9 @@ export type StoredUser = {
   id: string;
   phone: string;
   name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
 };
 
 export async function getRefreshToken(): Promise<string | null> {
@@ -42,7 +45,9 @@ export async function getStoredUser(): Promise<StoredUser | null> {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as StoredUser;
     // Defensive: validate shape so a corrupted blob returns null instead
-    // of throwing into the auth boot path.
+    // of throwing into the auth boot path. The newer fields (username,
+    // avatarUrl, bio) are optional — older stored blobs without them
+    // still parse, with the missing fields reading back as undefined.
     if (
       typeof parsed === 'object' &&
       parsed !== null &&

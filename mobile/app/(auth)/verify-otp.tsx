@@ -3,7 +3,7 @@ import { Pressable, View, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Text, useDialog } from '../../src/components/ui';
-import { colors, radius } from '../../src/theme';
+import { colors } from '../../src/theme';
 import { useAuth } from '../../src/features/auth/hooks/useAuth';
 
 const OTP_LENGTH = 6;
@@ -72,7 +72,14 @@ export default function VerifyOtpScreen() {
     setSubmitting(true);
     try {
       const result = await confirmOtp({ countryCode, phoneNumber, otp });
-      const needsName = !result.user.name || result.user.name.trim() === '';
+      // Welcome screen runs when EITHER the display name OR the username
+      // is missing — they are both collected on first onboarding and
+      // either could be left blank if the user closed the app mid-flow.
+      const needsName =
+        !result.user.name ||
+        result.user.name.trim() === '' ||
+        !result.user.username ||
+        result.user.username.trim() === '';
       router.replace(needsName ? '/(auth)/welcome' : '/(app)');
     } catch (e) {
       const code = (e as { code?: string }).code;

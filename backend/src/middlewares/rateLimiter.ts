@@ -81,6 +81,24 @@ export const groupCreateLimiter = makeLimiter({
   durationSeconds: TEN_MIN,
 });
 
+export const groupInviteLimiter = makeLimiter({
+  keyPrefix: 'rl:groups:invite:user',
+  points: 10,
+  durationSeconds: TEN_MIN,
+});
+
+export const groupInviteResponseLimiter = makeLimiter({
+  keyPrefix: 'rl:groups:inviteResponse:user',
+  points: 30,
+  durationSeconds: TEN_MIN,
+});
+
+export const groupLeaveLimiter = makeLimiter({
+  keyPrefix: 'rl:groups:leave:user',
+  points: 10,
+  durationSeconds: TEN_MIN,
+});
+
 /**
  * Express middleware factory: consumes `points` from a limiter keyed by
  * `keyFn(req)`. Throws AppError(RATE_LIMITED) on breach, including retry-after.

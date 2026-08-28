@@ -4,28 +4,89 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors, elevation, radius } from '../../../src/theme';
+import { colors } from '../../../src/theme';
 import { Text } from '../../../src/components/ui';
 import { Fab } from '../../../src/components/Fab';
 import { EmptyState } from '../../../src/components/EmptyState';
-import { listGroupPosts, type PostSummary } from '../../../src/api/posts.api';
+import { Button, useDialog } from '../../../src/components/ui';
+import { leaveGroup, getGroup } from '../../../src/api/groups.api';
+import { listPosts } from '../../../src/api/posts.api';
+import { PostCard } from '../../../src/components/PostCard';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
+/**
+ * Group detail screen. Header shows group name + member count; the list
+ * below shows recent posts. The Posts API still returns an empty array
+ * (Phase 3a lands the feed), so the empty state is the normal first-run
+ * view.
+ *
+ * Header actions:
+ *   - Back chevron (always)
+ *   - "Leave" button (hidden if the caller is the creator)
+ */
 export default function GroupDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const groupId = id ?? '';
+  const queryClient = useQueryClient();
+  const dialog = useDialog();
 
-  const postsQuery = useQuery({
-    queryKey: ['group', groupId, 'posts'],
-    queryFn: () => listGroupPosts(groupId),
+  const groupQuery = useQuery({
+    queryKey: ['group', groupId],
+    queryFn: () => getGroup(groupId),
     enabled: Boolean(groupId),
   });
 
-  const onRefresh = useCallback(() => {
-    postsQuery.refetch();
-  }, [postsQuery]);
+  const postsQuery = useQuery({
+    queryKey: ['group', groupId, 'posts'],
+    queryFn: () => listPosts({ groupId }),
+    enabled: Boolean(groupId),
+  });
 
+  const leaveMut = useMutation({
+    mutationFn: () => leaveGroup(groupId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['groups', 'mine'] });
+      router.back();
+    },
+    onError: (e) => {
+      dialog.show({
+        variant: 'danger',
+        title: 'Could not leave group',
+        message: e instanceof Error ? e.message : 'Try again',
+        actions: [{ label: 'OK' }],
+      });
+    },
+  });
+
+  const onLeavePress = () => {
+    dialog.show({
+      variant: 'warning',
+      title: 'Leave this group?',
+      message: 'You will stop seeing posts from this group.',
+      cancelLabel: 'Cancel',
+      actions: [
+        {
+          label: 'Leave',
+          variant: 'danger',
+          onPress: () => leaveMut.mutate(),
+        },
+      ],
+    });
+  };
+
+  const onRefresh = useCallback(() => {
+    groupQuery.refetch();
+    postsQuery.refetch();
+  }, [groupQuery, postsQuery]);
+
+  const group = groupQuery.data;
   const posts = postsQuery.data?.posts ?? [];
-  const isInitialLoad = postsQuery.isLoading && !postsQuery.data;
+  const isInitialLoad = groupQuery.isLoading && !groupQuery.data;
+  // The detail payload doesn't include the caller's id directly, so we
+  // can't reliably tell if the viewer is the creator. The Leave button
+  // is always shown; the backend rejects creator-leave with a clear 409
+  // and the dialog surfaces the error. (Adding a `viewerIsCreator` flag
+  // to the detail response would be a small follow-up.)
 
   return (
     <SafeAreaView className="flex-1 bg-surface" edges={['top']}>
@@ -41,12 +102,25 @@ export default function GroupDetailScreen() {
         </Pressable>
         <View className="flex-1 min-w-0 ml-1">
           <Text variant="h2" numberOfLines={1}>
-            {groupNamePlaceholder}
+            {group?.name ?? 'Group'}
           </Text>
           <Text variant="meta" tone="secondary" className="mt-0.5">
-            Member count
+            {group
+              ? `${group.members.length} member${group.members.length === 1 ? '' : 's'}`
+              : ' '}
           </Text>
         </View>
+        {group ? (
+          <Button
+            label="Leave"
+            variant="ghost"
+            size="sm"
+            fullWidth={false}
+            loading={leaveMut.isPending}
+            onPress={onLeavePress}
+            accessibilityLabel="Leave group"
+          />
+        ) : null}
       </View>
 
       <FlatList
@@ -81,7 +155,10 @@ export default function GroupDetailScreen() {
         }
         refreshControl={
           <RefreshControl
-            refreshing={postsQuery.isFetching && !postsQuery.isLoading}
+            refreshing={
+              (groupQuery.isFetching && !groupQuery.isLoading) ||
+              (postsQuery.isFetching && !postsQuery.isLoading)
+            }
             onRefresh={onRefresh}
             tintColor={colors.brand.primary}
           />
@@ -97,97 +174,4 @@ export default function GroupDetailScreen() {
       />
     </SafeAreaView>
   );
-}
-
-function PostCard({ post, onPress }: { post: PostSummary; onPress: () => void }) {
-  const initials = authorInitials(post.authorName);
-  const avatarColor = avatarColorFor(post.authorId);
-  const statusBg =
-    post.status === 'active'
-      ? 'bg-pill-info'
-      : post.status === 'revealed'
-      ? 'bg-surface-muted'
-      : '';
-
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Open post by ${post.authorName ?? 'unknown'}`}
-      className="bg-surface rounded-lg p-4 mb-3 border border-border active:bg-surface-muted"
-      style={{ borderRadius: radius.lg, ...elevation[1] }}
-    >
-      <View className="flex-row items-center mb-2.5">
-        <View
-          className="w-9 h-9 rounded-full items-center justify-center mr-3"
-          style={{ backgroundColor: avatarColor }}
-        >
-          <Text variant="metaStrong" tone="onDark">
-            {initials}
-          </Text>
-        </View>
-        <View className="flex-1 min-w-0 flex-row items-center justify-between">
-          <Text variant="bodyStrong" numberOfLines={1} className="flex-1 mr-2">
-            {post.authorName ?? 'Unknown author'}
-          </Text>
-          <View className={`px-2.5 py-1 rounded-sm ${statusBg}`}>
-            <Text variant="caption" bold>
-              {statusLabel(post.status)}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <Text variant="body" className="mb-3" numberOfLines={3}>
-        {post.caption}
-      </Text>
-
-      <View className="flex-row items-center gap-4">
-        <View className="flex-row items-center">
-          <MaterialCommunityIcons name="message-outline" size={16} color={colors.text.secondary} />
-          <Text variant="meta" tone="secondary" className="ml-1.5">
-            {post.commentCount}
-          </Text>
-        </View>
-        <View className="flex-row items-center">
-          <MaterialCommunityIcons name="heart-outline" size={16} color={colors.text.secondary} />
-          <Text variant="meta" tone="secondary" className="ml-1.5">
-            {post.reactionCount}
-          </Text>
-        </View>
-        <View className="flex-row items-center">
-          <MaterialCommunityIcons name="reply" size={16} color={colors.text.secondary} />
-          <Text variant="meta" tone="secondary" className="ml-1.5">
-            {post.responseCount}
-          </Text>
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-/* ----- helpers (component-local; promote to shared utils only if reused) ----- */
-
-const groupNamePlaceholder = 'Group';
-
-function statusLabel(status: PostSummary['status']): string {
-  if (status === 'active') return 'Active';
-  if (status === 'revealed') return 'Revealed';
-  return 'Deleted';
-}
-
-function authorInitials(name: string | null): string {
-  if (!name) return '?';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return (parts[0][0] ?? '?').toUpperCase();
-  return ((parts[0][0] ?? '?') + (parts[1][0] ?? '?')).toUpperCase();
-}
-
-function avatarColorFor(seed: string): string {
-  const palette = ['#0B49FA', '#7A4DFF', '#22C7B7', '#FFB020', '#FF3D7F'];
-  let h = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return palette[h % palette.length];
 }

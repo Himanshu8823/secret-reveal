@@ -2,22 +2,77 @@ import { apiClient, unwrap } from './client';
 import type { ApiEnvelope } from '../features/auth/types';
 
 /**
- * Mirrors the backend `post` shape returned by `GET /groups/:id/posts`.
- * `media` is intentionally omitted from the list response — the API returns
- * it but the list view doesn't render it. Keep this type lean so we don't
- * pull thumbnails we won't display.
+ * Posts API surface. Mirrors the backend `posts` module:
+ *   GET    /posts                       — list visible feed
+ *   POST   /posts                       — create a post
+ *   GET    /posts/:id                   — single post detail
+ *   POST   /posts/:id/reveal            — manually trigger reveal
+ *   POST   /posts/:id/reactions         — toggle a reaction
+ *   POST   /posts/:id/comments          — add a comment
+ *   GET    /posts/:id/responses         — list responses (anonymous mask)
+ *   POST   /posts/:id/responses         — submit a response
+ *
+ * The backend envelope is unwrapped here; callers see only the typed
+ * `data` payload.
+ */
+
+export type PostMediaItem = {
+  id: string;
+  url: string;
+  mimeType: string;
+  order: number;
+};
+
+export type DiscussionMeta = {
+  postId: string;
+  timerMinutes: number;
+  revealEndsAt: string;
+  revealedAt: string | null;
+  revealNotifiedAt: string | null;
+};
+
+export type PostStatus = 'active' | 'revealed' | 'deleted';
+export type ReactionType = 'like' | 'love' | 'laugh';
+
+/**
+ * Author block of a feed summary. Backend currently has no `username`
+ * or `avatarUrl` columns on `User` — those fields will land when the
+ * profile module does. For now they're always `null`, and the mobile
+ * side falls back to an initial-based coloured avatar.
+ */
+export type PostAuthor = {
+  id: string;
+  name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+};
+
+/**
+ * Single post in a feed page. Includes per-viewer fields
+ * (`hasReplied`, `viewerReaction`) so the home feed can render the
+ * correct badges without a follow-up request per card.
  */
 export type PostSummary = {
   id: string;
-  authorId: string;
-  authorName: string | null;
+  author: PostAuthor;
   groupId: string;
+  groupName: string;
   caption: string;
-  status: 'active' | 'revealed' | 'deleted';
+  status: PostStatus;
   createdAt: string;
-  responseCount: number;
+  media: PostMediaItem[];
+  discussionMeta: DiscussionMeta | null;
   reactionCount: number;
   commentCount: number;
+  responseCount: number;
+  hasReplied: boolean;
+  viewerReaction: ReactionType | null;
+};
+
+export type ListPostsParams = {
+  groupId?: string;
+  cursor?: string;
+  limit?: number;
 };
 
 export type ListPostsResponse = {
@@ -25,25 +80,55 @@ export type ListPostsResponse = {
   nextCursor: string | null;
 };
 
-export async function listGroupPosts(
-  groupId: string,
-  cursor?: string,
-): Promise<ListPostsResponse> {
-  const params = cursor ? { cursor } : {};
+export async function listPosts(params: ListPostsParams = {}): Promise<ListPostsResponse> {
+  const query: Record<string, string> = {};
+  if (params.groupId) query.groupId = params.groupId;
+  if (params.cursor) query.cursor = params.cursor;
+  if (params.limit) query.limit = String(params.limit);
+
   return unwrap<ListPostsResponse>(
-    apiClient.get<ApiEnvelope<ListPostsResponse>>(`/groups/${groupId}/posts`, { params }),
+    apiClient.get<ApiEnvelope<ListPostsResponse>>('/posts', {
+      params: Object.keys(query).length > 0 ? query : undefined,
+    }),
   );
 }
 
-// ---------------------------------------------------------------------------
-// Create Post (Phase 3 composer)
-// ---------------------------------------------------------------------------
+// --- Single post ----------------------------------------------------------
+
+export type PostDetail = {
+  id: string;
+  authorId: string;
+  authorName: string | null;
+  groupId: string;
+  groupName: string;
+  caption: string;
+  status: PostStatus;
+  createdAt: string;
+  updatedAt: string;
+  media: PostMediaItem[];
+  discussionMeta: DiscussionMeta | null;
+  responseCount: number;
+  reactionCount: number;
+  commentCount: number;
+  viewerReaction: ReactionType | null;
+};
+
+export async function getPost(postId: string): Promise<PostDetail> {
+  return unwrap<PostDetail>(
+    apiClient.get<ApiEnvelope<PostDetail>>(`/posts/${postId}`),
+  );
+}
+
+// --- Create post ----------------------------------------------------------
 
 export type CreatePostInput = {
   groupId: string;
   caption: string;
-  mediaIds: string[];
+  /** UUIDs of Media rows already uploaded in Phase 3b. */
+  mediaIds?: string[];
   timerMinutes: number;
+  /** Pre-accepted invitee ids. Phase 3a defaults to empty. */
+  inviteeIds?: string[];
 };
 
 export type CreatedPost = {
@@ -51,92 +136,126 @@ export type CreatedPost = {
   authorId: string;
   groupId: string;
   caption: string;
-  status: 'active' | 'revealed' | 'deleted';
+  status: PostStatus;
   createdAt: string;
+  updatedAt: string;
+  media: PostMediaItem[];
+  discussionMeta: DiscussionMeta;
+  /** Echo of accepted invitee ids persisted as GroupInvite rows. */
+  inviteeIds: string[];
 };
 
 export async function createPost(input: CreatePostInput): Promise<CreatedPost> {
-  return unwrap(
+  return unwrap<CreatedPost>(
     apiClient.post<ApiEnvelope<CreatedPost>>('/posts', input),
   );
 }
 
-// ---------------------------------------------------------------------------
-// Group creation (used by the Create Post flow — Phase 3 always creates
-// a fresh group; reusing an existing group is a v1.1 polish). Co-located
-// here so the composer screens don't depend on a separate file.
-// ---------------------------------------------------------------------------
+// --- Legacy re-exports -----------------------------------------------------
+//
+// Earlier versions of the composer co-located the `createGroup` helper in
+// this file (Phase 3 shape: `{ name, memberIds }`). Group creation has now
+// moved to `groups.api.ts` with the new phone-numbers shape; we re-export
+// from there so existing composer call-sites continue to resolve a name.
+// The shape differs (`memberIds` vs `phoneNumbers`); the composer is the
+// source of truth on which it sends.
+export { createGroup } from './groups.api';
+export type { CreateGroupInput } from './groups.api';
 
-export type CreateGroupInput = {
-  name: string;
-  memberIds: string[];
-};
+// --- Reveal ---------------------------------------------------------------
 
-export type CreatedGroup = {
-  id: string;
-  name: string;
-  createdById: string;
-  createdAt: string;
-};
-
-export async function createGroup(input: CreateGroupInput): Promise<CreatedGroup> {
-  return unwrap(
-    apiClient.post<ApiEnvelope<CreatedGroup>>('/groups', input),
+export async function revealPost(postId: string): Promise<PostDetail> {
+  return unwrap<PostDetail>(
+    apiClient.post<ApiEnvelope<PostDetail>>(`/posts/${postId}/reveal`, {}),
   );
 }
 
-// ---------------------------------------------------------------------------
-// Post detail + responses (Phase 4 — Hidden Discussion screen)
-// ---------------------------------------------------------------------------
+// --- Reactions ------------------------------------------------------------
 
-export type PostMediaItem = {
-  id: string;
-  url: string;
-  kind: 'image' | 'video' | 'audio';
+export type ToggleReactionInput = { type?: ReactionType };
+
+export type ToggleReactionResponse = {
+  /** Whether the caller is now reacted (after the toggle). */
+  reacted: boolean;
+  count: number;
+  /** Active reaction type. Equal to the input `type` on create, or the
+   *  previous type on removal. */
+  type: ReactionType;
 };
 
-export type DiscussionMeta = {
-  status: 'active' | 'revealed';
-  revealEndsAt: string | null;
-  remainingMs: number;
-};
-
-export type PostDetail = {
-  id: string;
-  authorId: string;
-  authorName: string | null;
-  groupId: string;
-  groupName: string | null;
-  caption: string;
-  media: PostMediaItem[];
-  discussionMeta: DiscussionMeta;
-  responseCount: number;
-  reactionCount: number;
-  commentCount: number;
-  createdAt: string;
-};
-
-export async function getPost(postId: string): Promise<PostDetail> {
-  return unwrap(
-    apiClient.get<ApiEnvelope<PostDetail>>(`/posts/${postId}`),
+export async function toggleReaction(
+  postId: string,
+  input: ToggleReactionInput = {},
+): Promise<ToggleReactionResponse> {
+  return unwrap<ToggleReactionResponse>(
+    apiClient.post<ApiEnvelope<ToggleReactionResponse>>(
+      `/posts/${postId}/reactions`,
+      input,
+    ),
   );
 }
 
-export type SubmitResponseInput = { body: string };
+// --- Comments (meta-discussion, never anonymous) --------------------------
 
-export type SubmittedResponse = {
+export type CreateCommentInput = { body: string };
+
+export type CommentItem = {
   id: string;
   postId: string;
   authorId: string;
+  authorName: string | null;
   body: string;
   createdAt: string;
+  updatedAt: string;
 };
+
+export async function createComment(
+  postId: string,
+  input: CreateCommentInput,
+): Promise<CommentItem> {
+  return unwrap<CommentItem>(
+    apiClient.post<ApiEnvelope<CommentItem>>(`/posts/${postId}/comments`, input),
+  );
+}
+
+// --- Responses ------------------------------------------------------------
+
+export type ResponseItem = {
+  id: string;
+  postId: string;
+  authorId: string;
+  /** Real name during revealed phase; `Anonymous #N` during active phase
+   *  (unless the viewer is the response author — see CLAUDE.md). */
+  authorName: string | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ListResponsesResponse = ResponseItem[];
+
+export async function listResponses(postId: string): Promise<ListResponsesResponse> {
+  return unwrap<ListResponsesResponse>(
+    apiClient.get<ApiEnvelope<ListResponsesResponse>>(`/posts/${postId}/responses`),
+  );
+}
+
+export type SubmitResponseInput = {
+  body: string;
+  /** Phase 3b: pre-uploaded Media UUIDs. */
+  mediaIds?: string[];
+};
+
+export type SubmitResponseResponse = ResponseItem;
 
 export async function submitResponse(
   postId: string,
   input: SubmitResponseInput,
-): Promise<SubmittedResponse> {
-  return unwrap(
-    apiClient.post<ApiEnvelope<SubmittedResponse>>(`/posts/${postId}/responses`, input),
+): Promise<SubmitResponseResponse> {
+  return unwrap<SubmitResponseResponse>(
+    apiClient.post<ApiEnvelope<SubmitResponseResponse>>(
+      `/posts/${postId}/responses`,
+      input,
+    ),
   );
 }

@@ -72,18 +72,26 @@ export default function CreateInvitesScreen() {
     }
     setSubmitting(true);
     try {
+      const inviteeIds = invitees.map((i) => i.id);
       const group = await createGroup({
         name: localGroupName.trim(),
-        memberIds: invitees.map((i) => i.id),
+        memberIds: inviteeIds,
       });
       await createPost({
         groupId: group.id,
         caption,
         mediaIds: [],
         timerMinutes,
+        // Pre-accepted invitees — these were already added as group
+        // members in the call above. Passing them again as inviteeIds
+        // persists the accepted GroupInvite rows in the same tx.
+        inviteeIds,
       });
-      // Invalidate groups cache so Home refetches when we land there.
+      // Invalidate groups + posts caches so Home refetches when we land
+      // there and the new post appears in the "Recent discussions"
+      // feed.
       queryClient.invalidateQueries({ queryKey: ['groups', 'mine'] });
+      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
       reset();
       router.dismissTo('/(app)/home');
     } catch (e) {

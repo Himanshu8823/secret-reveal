@@ -11,21 +11,26 @@ import { updateProfile } from '../../src/api/users.api';
 import { useAuthStore } from '../../src/store/authStore';
 import { setStoredUser } from '../../src/utils/secureStorage';
 
+const NAME_MAX = 60;
+const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
+
 /**
  * First-run welcome screen. Reached after verify-otp only when the user
- * has no display name yet (see verify-otp.tsx). On submit we PATCH
- * /users/me and update both the in-memory session and the persisted
- * user blob so a cold-start sees the latest name.
+ * has no display name OR no username yet (see verify-otp.tsx). On submit
+ * we PATCH /users/me with both name and username, then mirror the
+ * server's user shape back into the in-memory session AND the persisted
+ * user blob so a cold-start sees the latest values.
  */
 export default function WelcomeScreen() {
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const dialog = useDialog();
 
   const onContinue = async () => {
     if (submitting) return;
-    const trimmed = name.trim();
-    if (trimmed.length === 0) {
+    const trimmedName = name.trim();
+    if (trimmedName.length === 0) {
       dialog.show({
         variant: 'warning',
         title: 'Tell us your name',
@@ -34,25 +39,45 @@ export default function WelcomeScreen() {
       });
       return;
     }
-    if (trimmed.length > 60) {
+    if (trimmedName.length > NAME_MAX) {
       dialog.show({
         variant: 'warning',
         title: 'Too long',
-        message: 'Names must be at most 60 characters.',
+        message: `Names must be at most ${NAME_MAX} characters.`,
+        actions: [{ label: 'OK' }],
+      });
+      return;
+    }
+    const trimmedUsername = username.trim();
+    if (!USERNAME_REGEX.test(trimmedUsername)) {
+      dialog.show({
+        variant: 'warning',
+        title: 'Pick a username',
+        message: 'Usernames are 3-20 lowercase letters, digits, or underscores.',
         actions: [{ label: 'OK' }],
       });
       return;
     }
     setSubmitting(true);
     try {
-      const updated = await updateProfile({ name: trimmed });
+      const updated = await updateProfile({
+        name: trimmedName,
+        username: trimmedUsername,
+      });
       // Mirror the server's user shape back into the session so subsequent
-      // screens (and the persisted blob used by boot.ts) see the name.
+      // screens (and the persisted blob used by boot.ts) see the values.
       const session = useAuthStore.getState();
       if (session.accessToken && session.user) {
         useAuthStore.getState().setSession({
           accessToken: session.accessToken,
-          user: { id: updated.id, phone: updated.phone, name: updated.name },
+          user: {
+            id: updated.id,
+            phone: updated.phone,
+            name: updated.name,
+            username: updated.username,
+            avatarUrl: updated.avatarUrl,
+            bio: updated.bio,
+          },
           isNewUser: false,
         });
       }
@@ -60,12 +85,15 @@ export default function WelcomeScreen() {
         id: updated.id,
         phone: updated.phone,
         name: updated.name,
+        username: updated.username,
+        avatarUrl: updated.avatarUrl,
+        bio: updated.bio,
       });
       router.replace('/(app)');
     } catch (e) {
       dialog.show({
         variant: 'danger',
-        title: 'Could not save name',
+        title: 'Could not save profile',
         message: e instanceof Error ? e.message : 'Try again',
         actions: [{ label: 'OK' }],
       });
@@ -90,14 +118,34 @@ export default function WelcomeScreen() {
 
           <View className="flex-1 justify-center">
             <Input
+              label="Name"
               placeholder="Your name"
-              maxLength={60}
+              maxLength={NAME_MAX}
               autoFocus
               value={name}
               onChangeText={setName}
+              returnKeyType="next"
+              containerClassName="mb-5"
+              autoCapitalize="words"
+            />
+
+            <Input
+              label="Username"
+              placeholder="username"
+              maxLength={20}
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              helperText="3-20 lowercase letters, digits, or underscores"
               returnKeyType="done"
               onSubmitEditing={onContinue}
               containerClassName="mb-5"
+              leftSlot={
+                <Text variant="body" tone="secondary">
+                  @
+                </Text>
+              }
             />
 
             <Button

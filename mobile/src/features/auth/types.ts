@@ -7,6 +7,9 @@ export type AuthUser = {
   id: string;
   phone: string;
   name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
 };
 
 export type VerifyOtpResponse = {
