@@ -166,7 +166,7 @@ export default function LoginScreen() {
               <Text
                 variant="caption"
                 tone="link"
-                onPress={() => router.push('/(auth)/login' as never)}
+                onPress={() => router.push('/(auth)/legal/terms')}
                 style={{ textDecorationLine: 'underline' }}
               >
                 Terms of Service
@@ -175,7 +175,7 @@ export default function LoginScreen() {
               <Text
                 variant="caption"
                 tone="link"
-                onPress={() => router.push('/(auth)/login' as never)}
+                onPress={() => router.push('/(auth)/legal/privacy')}
                 style={{ textDecorationLine: 'underline' }}
               >
                 Privacy Policy
