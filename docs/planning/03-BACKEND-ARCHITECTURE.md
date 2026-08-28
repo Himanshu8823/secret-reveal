@@ -8,12 +8,14 @@
 
 ## 1. Guiding principles (recap of CLAUDE.md, applied)
 
-- **One Node service, one Postgres database, one Redis instance.** Do not introduce queues, microservices, or background workers until a concrete operational reason exists.
+- **One Node service, one Postgres database, one Redis instance on AWS.** Do not introduce queues, microservices, or background workers until a concrete operational reason exists.
+- **Media lives in S3.** Direct multipart upload for MVP (cap 25 MB); pre-signed URLs as a v1.1 upgrade.
 - **Business logic lives in the service layer of each module.** Controllers stay thin; routes mount + validate + delegate.
 - **Validation at the boundary, never trust `req.body`.** Zod schemas in each `*.validation.ts`, called in the controller as the very first line.
 - **One error envelope.** Typed `AppError` → central error middleware.
 - **All routes prefixed `/api/v1/...`.** Versioned from day one.
 - **Prisma is the only way to touch Postgres.** No raw SQL except `$queryRaw` with tagged templates for genuinely complex queries.
+- **Pricing is out of scope per user.** Architecture decisions are made for correctness and operability, not cost.
 
 ---
 
@@ -159,14 +161,85 @@ On every `/auth/refresh`:
 
 This prevents replay attacks and lets us kill a compromised device's session.
 
+### 5.2.1 The `/auth/refresh` endpoint contract
+
+```
+POST /api/v1/auth/refresh
+Headers: none (refresh token in body)
+Body: { refreshToken: string }
+
+200 OK
+{
+  "success": true,
+  "data": {
+    "accessToken": "eyJ…",
+    "refreshToken": "eyJ…",   // ← NEW token; old one is now dead
+    "user": { id, phone, name, avatarUrl, isNewUser: false }
+  }
+}
+
+401 (refresh dead or reused)
+{ "success": false, "error": { "code": "TOKEN_INVALID", "message": "…" } }
+```
+
+**Response shape matches `/auth/verify-otp`** so the client can use the same `setSession` action on either response.
+
+### 5.2.2 Reuse-detection algorithm (pseudocode)
+
+```ts
+async function refresh(oldToken: string) {
+  const payload = jwt.verify(oldToken, env.JWT_SECRET);
+  const oldJti = payload.jti;
+
+  return await prisma.$transaction(async (tx) => {
+    const row = await tx.refreshToken.findUnique({ where: { jti: oldJti } });
+
+    // Case 1: never seen this jti — straight reject.
+    if (!row) throw new AppError(401, TOKEN_INVALID, 'Unknown token');
+
+    // Case 2: this jti was already used. Reuse! Revoke the entire family.
+    if (row.isUsed) {
+      await tx.refreshToken.updateMany({
+        where: { familyId: row.familyId, isRevoked: false },
+        data: { isRevoked: true, revokedAt: now(), revokeReason: 'reuse_detected' },
+      });
+      await tx.adminAction.create({
+        data: { adminId: SYSTEM_ADMIN_ID, action: 'auto_revoke_family', targetType: 'user', targetId: row.userId, metadata: { familyId: row.familyId } },
+      });
+      throw new AppError(401, TOKEN_INVALID, 'Token reuse detected');
+    }
+
+    // Case 3: revoked by logout or another flow.
+    if (row.isRevoked) throw new AppError(401, TOKEN_INVALID, 'Revoked');
+
+    // Case 4: expired by time.
+    if (row.expiresAt < now()) throw new AppError(401, TOKEN_EXPIRED, 'Expired');
+
+    // Happy path: mark used, mint a new pair in the same family.
+    await tx.refreshToken.update({
+      where: { jti: oldJti },
+      data: { isUsed: true },
+    });
+    return mintNewTokens(row.userId, row.familyId);   // writes new jti, returns access + refresh
+  });
+}
+```
+
+Note: the **mark-as-used + insert-new** happens inside one Postgres transaction, so concurrent refresh calls with the same old token cannot both succeed — the second one sees `isUsed = true` and triggers Case 2.
+
 ### 5.3 OTP provider
 
-Per the auth service today, the provider is pluggable. The Twilio migration path is in `02-FRONTEND-ARCHITECTURE.md` §8 — it lives in the backend's `lib/otp/twilio.provider.ts`. Selection by env: `OTP_PROVIDER=mock|twilio`.
+The provider is pluggable. **The real provider is undecided** — user will tell us later. The interface (`OtpProvider`) is the only contract; the factory `getOtpProvider()` is exhaustive-typed, so adding any new provider is a compile-time check.
 
-**OTP generation policy:**
-- Mock (today): fixed `123456` for predictable testing.
-- Real (Twilio): 6 random digits via `crypto.randomInt(0, 1_000_000).toString().padStart(6, '0')`.
-- TTL: `env.OTP_TTL_SECONDS`, default 300 s.
+Selection by env: `OTP_PROVIDER=mock|<whatever>`.
+
+**Today:** `MockOtpProvider` (fixed `123456` for predictable testing). Lives in `backend/src/lib/otp/mock.provider.ts`.
+
+**When a real provider lands:** implement one file (e.g. `backend/src/lib/otp/twilio.provider.ts` or `msg91.provider.ts`), add the case to `getOtpProvider()`, add the new env vars to `config/env.ts`. No other code changes.
+
+**OTP generation policy (real provider):** 6 random digits via `crypto.randomInt(0, 1_000_000).toString().padStart(6, '0')`. Mock bypasses this.
+
+**TTL:** `env.OTP_TTL_SECONDS`, default 300 s.
 
 **OTP storage:** Redis key `otp:{e164}` → value, TTL = TTL. Delete on successful verify (single-use). Mismatch keeps key alive so user can retry until TTL or until verify-attempt limiter kicks in.
 
@@ -287,10 +360,14 @@ Limits are defined in code (env-overridable) so changes are auditable via PR.
 
 | Method | Path | Auth |
 | --- | --- | --- |
-| POST | `/media/upload` | access — multipart (MVP) | returns `{ mediaId, url }` |
+| POST | `/media/upload` | access — multipart (MVP), pre-signed PUT (v1.1) | returns `{ mediaId, url }` |
 | DELETE | `/media/:id` | access (owner) |
 
-For MVP we accept multipart up to 25 MB, store on local disk under `uploads/` (gitignored), serve via `/media/static/:id`. Pre-signed S3 URLs are a v2 concern — explicitly noted in CLAUDE.md as something we shouldn't add "just in case."
+**MVP storage:** S3 bucket (per user). Backend accepts multipart up to 25 MB, uploads to S3 with the appropriate key, stores the URL in `media.url`. AWS credentials come from env (IAM role preferred over keys — never commit keys).
+
+**Why multipart for MVP:** zero extra infra, no pre-signed URL infrastructure to build. Trade-off: bytes flow through our Node process. 25 MB cap is enough for short videos, audio, pdfs. Bumping above that needs pre-signed URLs.
+
+**v1.1 upgrade:** switch to pre-signed PUT URLs so the mobile app uploads directly to S3, bypassing our Node process entirely. Saves bandwidth and time on slow networks.
 
 ### 7.11 `reports`
 

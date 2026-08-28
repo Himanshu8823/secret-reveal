@@ -19,8 +19,11 @@ mobile/
 │   │   └── verify-otp.tsx        # not in references, required by flow
 │   ├── (app)/
 │   │   ├── _layout.tsx           # tab nav: Home / Groups / Create / Notifications / Profile
-│   │   ├── home.tsx              # screen 3
-│   │   ├── groups.tsx            # placeholder v1, real list in v2
+│   │   ├── home.tsx              # screen 3 — groups-first: list of groups + recent activity
+│   │   ├── groups.tsx            # alternative tab view of the user's groups (v1 may mirror home)
+│   │   ├── group/                # screen 3a
+│   │   │   ├── _layout.tsx
+│   │   │   └── [id].tsx          # group detail — that group's posts
 │   │   ├── create/               # screens 4 → 8
 │   │   │   ├── _layout.tsx       # modal-style stack
 │   │   │   ├── index.tsx         # screen 4
@@ -409,9 +412,9 @@ Uses `react-native-toast-message` (add to deps). For "OTP sent" / "Post publishe
 | Phase | Screens | Reference image |
 | --- | --- | --- |
 | **P1 — Auth** | 1, 2, verify-otp | `01` rows 1–2 |
-| **P2 — Home** | 3 | `02-home-feed-detail.png` |
-| **P3 — Create post** | 4, 5, 6, 7, 8 | `01` rows 2 (right), row 3 |
-| **P4 — Hidden discussion** | 9, 10, 11 | `01` row 5 |
+| **P2 — Home (groups-first)** | 3, 3a | `02-home-feed-detail.png` (reused as inspiration; home is now groups not stories) |
+| **P3 — Create post** | 4, 6, 7, 8 | `01` rows 2 (right), row 3 |
+| **P4 — Hidden discussion + reveal** | 9, 10, 11 | `01` row 5 + `06-hidden-discussion-detail.png` for screen 9 |
 | **P5 — Media + reporting** | 12, 13 | `01` rows 5–6 |
 | **P6 — Notifications + profile + settings** | 14, 15, 17 | `01` row 6 + row 7 |
 | **P7 — Admin web (out of mobile)** | 16 | `01` row 6 (admin) |
@@ -422,13 +425,238 @@ Uses `react-native-toast-message` (add to deps). For "OTP sent" / "Post publishe
 
 | State | Owner | Why |
 | --- | --- | --- |
-| Auth session (access + refresh tokens, user object) | `zustand` store with `persist` middleware writing access token in memory and refresh token via `expo-secure-store` | Survives app reload; refresh handled by axios interceptor |
+| Auth session (access + refresh tokens, user object, contactSalt) | `zustand` (memory) + `expo-secure-store` (refresh, user, salt) | Survives app reload; bootstrap reads secure-store on cold start |
 | Create-post composer (multi-step) | `zustand` store (no persistence) | Lost on app kill is fine; resumes within session |
 | Server-cached data (posts, feed) | TanStack Query (recommend adding) | Caching, retries, optimistic updates; works well with axios |
 | Notifications | `zustand` + polling every 30s (push in v2) | Cheap, no FCM complexity yet |
 | Settings toggles | AsyncStorage (or backend user prefs) | Persist |
+| Biometric-required flag | Secure-store | Per-device, security-sensitive |
 
 **TanStack Query addition rationale:** Right now we have no client cache. With a feed, post details, comments, and notifications to manage, hand-rolled loading/error states will balloon. `@tanstack/react-query` is the standard — add it in P2 when we first render the home feed.
+
+---
+
+## 5.1 Session persistence — how every real mobile app behaves
+
+A real mobile app **remembers the user**. Close it, kill it from the app switcher, reboot the phone — open it again and you're still in. Access tokens expire in 15 minutes and the user never sees a login screen because the app quietly swaps in a fresh one. Open Instagram after a week, open Gmail on a new device, open WhatsApp on a friend's phone with your number — they're already in. That is the baseline, not a stretch goal.
+
+NEXORA will behave the same way. The persistence plumbing is **mandatory from v1**, not a "we'll add it later" footnote. The pieces below describe how a production mobile session is built; none of them are optional.
+
+### 5.1.1 The auth state machine
+
+The app is in exactly one of these states at any time:
+
+```
+┌──────────────┐
+│   LOADING    │  ← boot: reading secure-store + calling /auth/refresh
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐         ┌──────────────────┐
+│ UNAUTHENTICATED│◀──────│   OFFLINE         │
+└──────┬───────┘  retry │ (network error,    │
+       │                 │  user can retry)   │
+       │ OTP verify      └──────────────────┘
+       ▼
+┌──────────────┐
+│ AUTHENTICATED│  ← valid access token in memory
+└──────┬───────┘
+       │ access expires / 401
+       ▼
+┌──────────────┐
+│  REFRESHING  │  ← in-flight /auth/refresh (transient)
+└──────┬───────┘
+       │
+       ├─ success → AUTHENTICATED
+       └─ failure → UNAUTHENTICATED
+```
+
+The user only ever sees **Splash**, **Home**, or **Login** in normal use. OFFLINE and REFRESHING are internal states — the UI hides them behind skeleton loaders, never a login prompt.
+
+### 5.1.2 What lives in which storage
+
+| Data | Storage | Why |
+| --- | --- | --- |
+| Access token | Memory only (zustand) | Short TTL (15 min); never on disk |
+| Refresh token | `expo-secure-store` (iOS Keychain / Android Keystore) | Encrypted at rest, gated by device PIN/biometric |
+| User profile (id, name, phone, avatarUrl) | `expo-secure-store` as JSON | Needed to render UI before any network call |
+| `contactSalt` | `expo-secure-store` | Per-user; required for contact hashing client-side |
+| Biometric-required flag | `expo-secure-store` | Toggles whether the unlock screen shows on cold start |
+| Onboarding flags ("seen splash") | `AsyncStorage` | Not sensitive; needs to be fast |
+| Theme preference | `AsyncStorage` | Same |
+| Last-known notifications timestamp | `AsyncStorage` | Cheap read for the polling loop |
+
+**Rule:** if the data is required for *authentication* or *identity*, secure-store. If it's *preferences* or *caching*, AsyncStorage. Never put a token in AsyncStorage.
+
+### 5.1.3 Cold-start bootstrap
+
+```ts
+// src/features/auth/boot.ts
+import { getRefreshToken, setRefreshToken, clearRefreshToken } from '../../utils/secureStorage';
+import { useAuthStore } from '../../store/authStore';
+import { refresh } from '../../api/auth.api';
+
+export type AuthBootResult =
+  | { state: 'loading' }
+  | { state: 'authenticated' }
+  | { state: 'unauthenticated' }
+  | { state: 'offline'; error: unknown };
+
+export async function bootstrapAuth(): Promise<AuthBootResult> {
+  const refreshToken = await getRefreshToken();
+  if (!refreshToken) return { state: 'unauthenticated' };
+
+  try {
+    const { accessToken, refreshToken: newRefresh, user } = await refresh(refreshToken);
+    // CRITICAL: write the new refresh token BEFORE clearing the old one.
+    // A crash mid-rotation leaves us with the new (valid) token, not signed out.
+    await setRefreshToken(newRefresh);
+    useAuthStore.getState().setSession({ accessToken, user, isNewUser: false });
+    return { state: 'authenticated' };
+  } catch (e) {
+    if (isAuthError(e)) {
+      await clearRefreshToken();
+      return { state: 'unauthenticated' };
+    }
+    return { state: 'offline', error: e };
+  }
+}
+```
+
+### 5.1.4 Root index — what the user sees on launch
+
+```tsx
+// app/index.tsx
+import { useEffect, useState } from 'react';
+import { Redirect } from 'expo-router';
+import { bootstrapAuth, type AuthBootResult } from '../src/features/auth/boot';
+import { SplashScreen } from '../src/components/SplashScreen';
+import { OfflineScreen } from '../src/components/OfflineScreen';
+
+export default function RootIndex() {
+  const [boot, setBoot] = useState<AuthBootResult>({ state: 'loading' });
+
+  useEffect(() => {
+    bootstrapAuth().then(setBoot);
+  }, []);
+
+  switch (boot.state) {
+    case 'loading':
+      return <SplashScreen />;
+    case 'offline':
+      return (
+        <OfflineScreen
+          onRetry={() => bootstrapAuth().then(setBoot)}
+        />
+      );
+    case 'authenticated':
+      return <Redirect href="/(app)" />;
+    case 'unauthenticated':
+      return <Redirect href="/(auth)/login" />;
+  }
+}
+```
+
+`<SplashScreen />` is the same component as the brand splash (screen 1) — logo + tagline, ≤ 1 s on warm network. The user should rarely see this for more than a heartbeat.
+
+### 5.1.5 Axios interceptor — silent background refresh
+
+While the user is browsing the feed, the access token expires. The next API call gets a 401. The user should never see a login screen — the app should swap in a fresh token and retry, invisibly.
+
+A **single-flight** pattern is critical. Otherwise 5 stale requests each kick off their own refresh and one of them races the others:
+
+```ts
+// src/api/client.ts (excerpt)
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function tryRefresh(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const token = await getRefreshToken();
+    if (!token) return null;
+    try {
+      const { accessToken, refreshToken: newRefresh } = await refresh(token);
+      await setRefreshToken(newRefresh);
+      useAuthStore.getState().setAccessToken(accessToken);
+      return accessToken;
+    } catch {
+      await clearRefreshToken();
+      useAuthStore.getState().signOut();
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+client.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    const original = error.config;
+    if (error.response?.status !== 401 || original._retry) throw error;
+    original._retry = true;
+    const newToken = await tryRefresh();
+    if (!newToken) throw error;
+    original.headers.Authorization = `Bearer ${newToken}`;
+    return client.request(original);
+  },
+);
+```
+
+### 5.1.6 Biometric lock on cold start (ships in v1.1, designed in v1)
+
+Modern banking apps, WhatsApp, Telegram — they all do this. Architecture supports it from day one; the toggle UI ships in Phase 6 (Settings) but the unlock screen component is built in Phase 0.4.
+
+```
+App launches → LOADING
+   ↓
+If biometric_required: true (per-user toggle in secure-store)
+   ↓
+Show <BiometricGateScreen />
+   ↓
+expo-local-authentication.authenticateAsync({ biometricOnly: true })
+   ↓
+   ├─ success → AUTHENTICATED branch (continue normal bootstrap)
+   ├─ fail × 3 → fall back to OTP login
+   └─ user cancels → keep showing the gate
+```
+
+For v1 we ship `biometric_required = false` by default; the toggle is in Settings (screen 17) and persisted to secure-store.
+
+Library: `expo-local-authentication` (NOT YET INSTALLED — add in Phase 6).
+
+### 5.1.7 Multi-account support (ships in v1.1, designed in v1)
+
+Telegram, Gmail, Instagram all let users switch accounts without re-entering OTP. Architecture now (so we don't retrofit later):
+
+- Secure-store keys become namespaced: `auth.refreshToken.<userId>`, `auth.user.<userId>`, `auth.contactSalt.<userId>`.
+- One extra key: `auth.activeUserId` — points to the currently-active account.
+- Auth state machine gains a `switchAccount(userId)` action.
+
+For v1 we ship single-account only, with the keys already structured as if multi-account were live. No future migration needed.
+
+### 5.1.8 What this changes in today's code
+
+| File | Today | After Phase 0.4 |
+| --- | --- | --- |
+| `app/index.tsx` | reads in-memory token, always redirects to login on cold start | calls `bootstrapAuth()`, renders loading / offline / redirect |
+| `app/_layout.tsx` | no gate | unchanged (gating happens in `index.tsx`) |
+| `src/store/authStore.ts` | in-memory only | adds `signOut()` that clears secure-store; adds `setAccessToken` separate from `setSession` |
+| `src/utils/secureStorage.ts` | only refresh token | adds `getUser`, `setUser`, `clearUser`, `getContactSalt`, `setContactSalt`, `getBiometricRequired`, `setBiometricRequired` |
+| `src/api/auth.api.ts` | `requestOtp`, `verifyOtp` | adds `refresh(refreshToken)` |
+| `src/api/client.ts` | request interceptor only | adds response interceptor with single-flight refresh |
+
+### 5.1.9 Tests required
+
+- Cold start with valid refresh token → reaches `/(app)` (mocked `/auth/refresh` returns 200)
+- Cold start with no refresh token → reaches `/(auth)/login`
+- Cold start with expired refresh token → `/auth/refresh` 401 → clears secure-store → reaches login
+- Cold start with network error → renders `<OfflineScreen />` with retry
+- Two concurrent 401s → only one `/auth/refresh` fires (single-flight)
+- Mid-rotation crash → next boot still has the new refresh token
+
+Backend tests cover reuse detection (covered in §5.2 of the backend doc).
 
 ---
 
@@ -555,11 +783,86 @@ Detox is the v2 candidate.
 
 ---
 
-## 13. Open questions (flagged for user)
+## 12.5 Brand centralisation (rebrand in one file)
 
-1. Do we need in-app Story *creation* in MVP, or only viewing?
-2. Do we keep the splash screen, or auto-skip to login on warm start?
-3. Is "Email sign-in" tab on screen 2 (visible in reference) — do we implement it now or hide?
-4. The Login screen in reference has both "Mobile" and "Email" tabs. Should the email tab be visible but disabled, or removed?
+User has not locked the brand name yet. Currently we use **NEXORA** everywhere. To make a future rebrand a one-file change:
 
-These are scoped in `05-IMPLEMENTATION-ROADMAP.md` as decisions to confirm before each phase.
+### 12.5.1 Mobile — `mobile/src/config/app.ts`
+
+```ts
+export const APP_NAME = 'NEXORA';
+export const APP_TAGLINE = 'Share Privately. Connect Deeply.';
+export const APP_SHORT_DESCRIPTION = 'Hidden discussions, revealed on your terms.';
+```
+
+All screens import from here:
+
+```tsx
+import { APP_NAME, APP_TAGLINE } from '../src/config/app';
+// …
+<Text style={styles.header}>Welcome Back</Text>
+<Text style={styles.subtitle}>Login to continue to {APP_NAME}</Text>
+```
+
+Grep check before any rebrand PR: `grep -r "NEXORA" mobile/src mobile/app` should return only `config/app.ts`. Any other hit is a regression.
+
+### 12.5.2 Backend — `backend/src/config/brand.ts`
+
+```ts
+export const BRAND = {
+  name: 'NEXORA',
+  tagline: 'Share Privately. Connect Deeply.',
+  supportEmail: 'support@nexora.example',
+  legalUrl: 'https://nexora.example/terms',
+} as const;
+```
+
+Returned to the mobile app as part of `/users/me`:
+
+```json
+{
+  "user": { "id": "...", "phone": "..." },
+  "brand": { "name": "NEXORA", "tagline": "..." }
+}
+```
+
+This way if branding changes server-side (admin update, white-label for an enterprise customer), the app picks it up on next login.
+
+### 12.5.3 What stays hardcoded (deliberately)
+
+- The wordmark font weight / letter-spacing in `styles` (typography choices are design decisions, not brand identity)
+- The blue gradient hex (`#0B49FA` → `#01125C`) — token-level, lives in `00-DESIGN-TOKENS-EXTRACTION.md` and `tailwind.config.js`
+- Logo PNG / SVG (asset file, not config)
+- App store names (`app.config.ts` `name` and `ios.bundleIdentifier` / `android.package`) — these are configured per environment
+
+### 12.5.4 Renaming process (when it happens)
+
+1. Edit `mobile/src/config/app.ts` and `backend/src/config/brand.ts`.
+2. Update `app.config.ts` `name` field.
+3. Update `app.config.ts` splash image assets under `mobile/assets/images/`.
+4. Update `package.json` `name` field on both backend and mobile (mostly cosmetic but matters for npm scripts).
+5. Run `grep -r "NEXORA" .` and verify only the brand config files + intentional marketing copy still match.
+
+---
+
+## 13. Open questions
+
+**All product decisions from the kickoff conversation are now resolved.** No open questions. If something new comes up during build that requires a user call, log it in `docs/planning/DECISIONS.md` (to be created when the first such question arises) so the history is preserved.
+
+### 13.1 Resolved decisions (locked)
+
+| Question | Answer |
+| --- | --- |
+| Story creation in v1? | **No — stories are out of scope.** NEXORA is not Instagram. Home is groups-first; posts are private to groups. The reference images showed story rings, but we explicitly exclude them. |
+| Splash screen — show every launch? | **Yes — every launch.** No skip-on-warm-start. The NEXORA logo + tagline show for ≤ 1 s on every cold start. |
+| Group name — auto-generated or user-typed? | **User must type it.** Screen 6 (Group Invitation) has a text input for the group name. No auto-generated names. |
+| Comments + reactions on revealed posts? | **Yes — in v1.** The reveal screen (11) is interactive: post body, all responses, comment thread, like button. **Three distinct actions: comment, react, like.** All stored, all rendered. |
+| Roles? | **Two only: User and Admin.** User is creator + viewer; Admin is reserved in DB (`users.isAdmin`) but unused in v1. |
+| Email tab on Login screen? | **No — not implemented.** Mobile/OTP only. Email sign-in is v2. |
+| Web client in MVP? | **No — mobile only (iOS + Android).** |
+| Cloud storage? | **AWS S3.** Multipart upload for MVP (cap 25 MB), pre-signed URLs as v1.1 upgrade. |
+| Brand name flexibility? | **Centralised.** `mobile/src/config/app.ts` + `backend/src/config/brand.ts`. |
+| Test depth? | **Test-lite.** Auth, phone, visibility checks get unit tests; manual smoke for the rest. |
+| Reference screen changes? | **None.** The 17 reference images (minus stories) + `06-hidden-discussion-detail.png` are the target. |
+| Hosting? | **AWS.** Managed Postgres + managed Redis + S3. Pricing out of scope. |
+| Public posting (no group)? | **No — every post belongs to a group.** Group is implicit during the create flow. |

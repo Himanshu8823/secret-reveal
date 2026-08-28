@@ -1,16 +1,77 @@
+import { useEffect, useState } from 'react';
 import { Redirect } from 'expo-router';
+import { View } from 'react-native';
 import { useAuthStore } from '../src/store/authStore';
+import { bootstrapAuth, type AuthBootState } from '../src/features/auth/boot';
+import { OfflineScreen } from '../src/components/OfflineScreen';
+import { Pill } from '../src/components/Pill';
 
 /**
- * Root index — picks the right first route based on auth state.
- *   - not logged in  -> /login
- *   - logged in      -> /(app)
+ * Root index — runs the cold-start bootstrap state machine.
  *
- * The access token lives in-memory (zustand) and is gone on app restart,
- * so a cold start almost always lands on login. That's intentional for
- * this phase — refresh-token bootstrapping is out of scope.
+ *   loading         -> render a brief splash view (Pill dev-only variant below)
+ *   authenticated   -> Redirect to /(app) — we already have a fresh access token
+ *   unauthenticated -> Redirect to /(auth)/login
+ *   offline         -> render OfflineScreen with retry
+ *
+ * Closing the app and reopening must NOT log the user out — bootstrapAuth
+ * reads the refresh token from expo-secure-store and calls /auth/refresh
+ * to mint a fresh access token. If the refresh succeeds, the user lands
+ * in (app) directly.
  */
 export default function RootIndex() {
-  const accessToken = useAuthStore((s) => s.accessToken);
-  return accessToken ? <Redirect href="/(app)" /> : <Redirect href="/(auth)/login" />;
+  const [boot, setBoot] = useState<AuthBootState>({ state: 'loading' });
+  const [retrying, setRetrying] = useState(false);
+
+  useEffect(() => {
+    bootstrapAuth().then(setBoot);
+  }, []);
+
+  const retry = () => {
+    setRetrying(true);
+    bootstrapAuth().then((s) => {
+      setBoot(s);
+      setRetrying(false);
+    });
+  };
+
+  // TEMP (Phase 0.1 sanity check): render the NativeWind Pill in dev so we can
+  // visually confirm Tailwind compiles. Removed once Home screen exists.
+  if (
+      process.env.NODE_ENV !== 'production'
+      && process.env.EXPO_PUBLIC_SHOW_TOKEN_SANITY === '1'
+    ) {
+      return (
+        <View className="flex-1 items-center justify-center bg-background p-6 gap-3">
+          <Pill label="Hidden Discussion" tone="info" />
+          <Pill label="Accepted" tone="success" />
+          <Pill label="Pending" tone="warning" />
+          <Pill label="Rejected" tone="danger" />
+          <Pill label="Neutral" tone="neutral" />
+        </View>
+      );
+    }
+
+  switch (boot.state) {
+    case 'loading':
+      return null; // Brief blank moment — boot is sub-second on warm network.
+    case 'authenticated': {
+      // The store is already populated by bootstrapAuth. We still need the
+      // auth-aware redirect.
+      const accessToken = useAuthStore.getState().accessToken;
+      return accessToken ? <Redirect href="/(app)" /> : <Redirect href="/(auth)/login" />;
+    }
+    case 'unauthenticated':
+      return <Redirect href="/(auth)/login" />;
+    case 'offline':
+      return (
+        <OfflineScreen
+          onRetry={retry}
+          retrying={retrying}
+          errorMessage={
+            boot.error instanceof Error ? boot.error.message : undefined
+          }
+        />
+      );
+  }
 }

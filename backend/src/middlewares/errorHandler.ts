@@ -23,6 +23,7 @@ export function errorHandler(
   if (err instanceof AppError) {
     res.status(err.status).json({
       success: false,
+      version: 'v1',
       error: {
         code: err.code,
         message: err.message,
@@ -35,6 +36,7 @@ export function errorHandler(
   if (err instanceof ZodError) {
     res.status(400).json({
       success: false,
+      version: 'v1',
       error: {
         code: ErrorCode.VALIDATION_FAILED,
         message: 'Invalid request',
@@ -45,9 +47,19 @@ export function errorHandler(
   }
 
   // Unknown — log full error server-side, return generic to client.
-  logger.error({ err, path: req.path, method: req.method }, 'unhandled error');
+  logger.error(
+    {
+      err,
+      requestId: req.id,
+      userId: req.user?.id,
+      path: req.path,
+      method: req.method,
+    },
+    'unhandled error',
+  );
   res.status(500).json({
     success: false,
+    version: 'v1',
     error: {
       code: ErrorCode.INTERNAL,
       message: 'Internal server error',

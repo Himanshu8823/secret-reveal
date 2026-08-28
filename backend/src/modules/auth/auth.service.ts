@@ -2,7 +2,10 @@ import { prisma } from '../../config/db.js';
 import { redis } from '../../config/redis.js';
 import { env } from '../../config/env.js';
 import { AppError, ErrorCode } from '../../lib/AppError.js';
-import { signAccessToken, signRefreshToken } from '../../lib/jwt.js';
+import { signAccessToken } from '../../lib/jwt.js';
+import { logger } from '../../lib/logger.js';
+import { maskPhone } from '../../lib/phone.js';
+import { issueRefresh } from './token.service.js';
 import type { AuthUser, VerifyOtpResult } from './auth.types.js';
 import { getOtpProvider } from './otp.provider.js';
 
@@ -22,6 +25,9 @@ export async function requestOtp(phone: string): Promise<void> {
   await provider.sendOtp(phone, otp);
   // SET with EX — explicit TTL, no key can live forever.
   await redis.set(otpKey(phone), otp, 'EX', env.OTP_TTL_SECONDS);
+  // Lifecycle event — useful for ops dashboards ("are OTPs being requested?")
+  // and incident triage. Phone is masked; OTP is never logged.
+  logger.info({ phone: maskPhone(phone) }, 'OTP requested');
 }
 
 /**
@@ -59,8 +65,16 @@ export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpRe
     ? (await prisma.user.create({ data: { phone } })) satisfies AuthUser
     : (existing satisfies AuthUser);
 
+  if (isNewUser) {
+    // Signup is a meaningful business event — track it.
+    logger.info({ userId: user.id }, 'new user created');
+  }
+
   const accessToken = signAccessToken({ sub: user.id, phone: user.phone });
-  const refreshToken = signRefreshToken({ sub: user.id });
+  // Refresh-token issuance is a side effect: token.service writes the jti to
+  // refresh_tokens so /auth/refresh and /auth/logout can find/rotate/revoke
+  // it. The user is already created above; here we just open a new family.
+  const { token: refreshToken } = await issueRefresh(user.id);
 
   return { isNewUser, accessToken, refreshToken, user };
 }

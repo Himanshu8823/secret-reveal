@@ -4,11 +4,11 @@
  */
 
 export type RequestOtpInput = {
-  phone: string;
+  e164: `+${string}`;
 };
 
 export type VerifyOtpInput = {
-  phone: string;
+  e164: `+${string}`;
   otp: string;
 };
 

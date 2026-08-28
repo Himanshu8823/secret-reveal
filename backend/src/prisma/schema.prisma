@@ -12,11 +12,224 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
+  id        String   @id @default(uuid()) @db.Uuid
   phone     String   @unique
   name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt    @db.Timestamptz(6)
+
+  refreshTokens  RefreshToken[]
+  createdGroups  Group[]         @relation("groupCreator")
+  memberships    GroupMember[]
+  sentInvites    GroupInvite[]   @relation("inviter")
+  receivedInvites GroupInvite[]  @relation("invitee")
+  authoredPosts  Post[]          @relation("author")
+  responses      Response[]
+  reactions      Reaction[]
+  comments       Comment[]
+  media          Media[]
 
   @@map("users")
+}
+
+model RefreshToken {
+  jti        String   @id @db.Uuid
+  userId     String   @db.Uuid
+  familyId   String   @db.Uuid
+  isUsed     Boolean  @default(false)
+  isRevoked  Boolean  @default(false)
+  expiresAt  DateTime @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  userAgent  String?  @db.VarChar(255)
+  ipAddress  String?  @db.VarChar(45)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+  @@index([userId, familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model Group {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String   @db.VarChar(60)
+  createdById     String   @db.Uuid
+  lastActivityAt  DateTime @default(now()) @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt          @db.Timestamptz(6)
+
+  createdBy User           @relation("groupCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  members   GroupMember[]
+  invites   GroupInvite[]
+  posts     Post[]
+
+  @@index([createdById])
+  @@index([lastActivityAt(sort: Desc)])
+  @@map("groups")
+}
+
+model GroupMember {
+  groupId  String   @db.Uuid
+  userId   String   @db.Uuid
+  role     String   @default("member") @db.VarChar(20)  // 'member' only in v1
+  joinedAt DateTime @default(now()) @db.Timestamptz(6)
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+model GroupInvite {
+  id          String   @id @default(uuid()) @db.Uuid
+  groupId     String   @db.Uuid
+  inviterId   String   @db.Uuid
+  inviteeId   String   @db.Uuid
+  status      String   @default("pending") @db.VarChar(20)  // pending | accepted | rejected
+  respondedAt DateTime?
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt          @db.Timestamptz(6)
+
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviter User  @relation("inviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee User  @relation("invitee", fields: [inviteeId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, inviteeId])
+  @@index([inviteeId, status])
+  @@map("group_invites")
+}
+
+model Media {
+  id          String   @id @default(uuid()) @db.Uuid
+  uploaderId  String   @db.Uuid
+  url         String   @db.VarChar(512)
+  s3Key       String?  @db.VarChar(512)
+  mimeType    String   @db.VarChar(64)
+  sizeBytes   BigInt
+  width       Int?
+  height      Int?
+  durationSec Int?
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  uploader       User           @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  postMedia      PostMedia[]
+  responseMedia  ResponseMedia[]
+
+  @@index([uploaderId, createdAt(sort: Desc)])
+  @@map("media")
+}
+
+model Post {
+  id          String   @id @default(uuid()) @db.Uuid
+  authorId    String   @db.Uuid
+  groupId     String   @db.Uuid
+  caption     String   @db.VarChar(2000)
+  status      String   @default("active") @db.VarChar(20)  // active | revealed | deleted
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt          @db.Timestamptz(6)
+  deletedAt   DateTime?
+
+  author         User           @relation("author", fields: [authorId], references: [id], onDelete: Cascade)
+  group          Group          @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  media          PostMedia[]
+  discussionMeta DiscussionMeta?
+  responses      Response[]
+  reactions      Reaction[]
+  comments       Comment[]
+
+  @@index([groupId, createdAt(sort: Desc)])
+  @@index([authorId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("posts")
+}
+
+model DiscussionMeta {
+  postId           String   @id @db.Uuid
+  timerMinutes     Int
+  revealEndsAt     DateTime @db.Timestamptz(6)
+  revealedAt       DateTime?
+  revealNotifiedAt DateTime?
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([revealEndsAt, revealedAt])
+  @@map("discussion_meta")
+}
+
+model PostMedia {
+  postId  String @db.Uuid
+  mediaId String @db.Uuid
+  order   Int
+
+  post  Post  @relation(fields: [postId], references: [id], onDelete: Cascade)
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@id([postId, mediaId])
+  @@index([mediaId])
+  @@map("post_media")
+}
+
+model Response {
+  id        String   @id @default(uuid()) @db.Uuid
+  postId    String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String   @db.VarChar(2000)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt          @db.Timestamptz(6)
+  deletedAt DateTime?
+
+  post   Post            @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  media  ResponseMedia[]
+
+  @@index([postId, createdAt])
+  @@index([authorId, createdAt(sort: Desc)])
+  @@map("responses")
+}
+
+model ResponseMedia {
+  responseId String @db.Uuid
+  mediaId    String @db.Uuid
+  order      Int
+
+  response Response @relation(fields: [responseId], references: [id], onDelete: Cascade)
+  media    Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@id([responseId, mediaId])
+  @@index([mediaId])
+  @@map("response_media")
+}
+
+model Reaction {
+  postId    String   @db.Uuid
+  userId    String   @db.Uuid
+  type      String   @default("like") @db.VarChar(20)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([postId])
+  @@map("reactions")
+}
+
+model Comment {
+  id        String   @id @default(uuid()) @db.Uuid
+  postId    String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String   @db.VarChar(1000)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt          @db.Timestamptz(6)
+  deletedAt DateTime?
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+  @@index([authorId, createdAt(sort: Desc)])
+  @@map("comments")
 }

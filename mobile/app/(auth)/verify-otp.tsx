@@ -1,29 +1,28 @@
 import { useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
+import { View, TextInput, Alert, type TextInput as TITextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { colors } from '../../src/theme/colors';
-import { typography } from '../../src/theme/typography';
+import { Button, Card, Pill, Text } from '../../src/components/ui';
+import { colors, radius, spacing } from '../../src/theme';
 import { useAuth } from '../../src/features/auth/hooks/useAuth';
 
 const OTP_LENGTH = 6;
 
 export default function VerifyOtpScreen() {
-  // Phone comes from navigation params — NOT global state — per the kickoff.
-  const { phone } = useLocalSearchParams<{ phone: string }>();
+  // The login screen passes { countryCode, phoneNumber, e164 }. We re-send
+  // countryCode + phoneNumber on confirm — the backend re-validates and
+  // the E.164 it derives must match what we passed here. (If the user
+  // tampered with route params, the validation fails server-side.)
+  const { countryCode, phoneNumber, e164 } = useLocalSearchParams<{
+    countryCode: string;
+    phoneNumber: string;
+    e164: string;
+  }>();
   const { confirmOtp } = useAuth();
 
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const [submitting, setSubmitting] = useState(false);
-  const inputs = useRef<(TextInput | null)[]>([]);
+  const inputs = useRef<(TITextInput | null)[]>([]);
 
   const setDigit = (i: number, v: string) => {
     // Sanitize: digits only, single char.
@@ -43,7 +42,7 @@ export default function VerifyOtpScreen() {
   };
 
   const onVerify = async () => {
-    if (submitting || !phone) return;
+    if (submitting || !countryCode || !phoneNumber) return;
     const otp = digits.join('');
     if (otp.length !== OTP_LENGTH) {
       Alert.alert('Enter the full code', 'Type all 6 digits.');
@@ -51,9 +50,12 @@ export default function VerifyOtpScreen() {
     }
     setSubmitting(true);
     try {
-      await confirmOtp(phone, otp);
-      // Route into the (app) group. Stub for now — see plan note.
-      router.replace('/(app)');
+      const result = await confirmOtp({ countryCode, phoneNumber, otp });
+      // After verify-otp, the first-time flow routes to /(auth)/welcome to
+      // collect a display name; returning users (or anyone whose name is
+      // already set) skip straight to the app.
+      const needsName = !result.user.name || result.user.name.trim() === '';
+      router.replace(needsName ? '/(auth)/welcome' : '/(app)');
     } catch (e) {
       const code = (e as { code?: string }).code;
       const message =
@@ -73,21 +75,26 @@ export default function VerifyOtpScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Verify your number</Text>
-        <Text style={styles.subtitle}>
-          We sent a 6-digit code to {phone ?? 'your phone'}.
+    <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>
+      <View className="flex-1 p-6 pt-12">
+        <Text variant="h1">Verify your number</Text>
+        <Text variant="body" tone="secondary" className="mt-2 mb-8">
+          We sent a 6-digit code to {e164 ?? 'your phone'}.
         </Text>
 
-        <View style={styles.otpRow}>
+        {__DEV__ ? (
+          <Card variant="flat" padding={3} className="mb-6 bg-pill-warning">
+            <Pill label="Dev mode — use 123456" tone="warning" withDot />
+          </Card>
+        ) : null}
+
+        <View className="flex-row justify-between mb-6">
           {digits.map((d, i) => (
             <TextInput
               key={i}
               ref={(el) => {
                 inputs.current[i] = el;
               }}
-              style={styles.otpCell}
               keyboardType="number-pad"
               inputMode="numeric"
               maxLength={1}
@@ -95,71 +102,33 @@ export default function VerifyOtpScreen() {
               onChangeText={(v) => setDigit(i, v)}
               onKeyPress={(e) => onKeyPress(i, e.nativeEvent.key)}
               autoFocus={i === 0}
-              selectionColor={colors.primary}
+              selectionColor={colors.brand.primary}
+              style={{
+                width: 48,
+                height: 56,
+                borderWidth: 1,
+                borderColor: colors.border.DEFAULT,
+                borderRadius: radius.md,
+                textAlign: 'center',
+                backgroundColor: colors.surface.muted,
+                fontSize: 22,
+                fontWeight: '700',
+                color: colors.text.primary,
+                marginHorizontal: spacing[1],
+              }}
             />
           ))}
         </View>
 
-        <Pressable
-          style={({ pressed }) => [
-            styles.primaryButton,
-            pressed && styles.primaryButtonPressed,
-            submitting && styles.primaryButtonDisabled,
-          ]}
+        <Button
+          label="Verify"
+          variant="primary"
+          size="lg"
+          fullWidth
+          loading={submitting}
           onPress={onVerify}
-          disabled={submitting}
-        >
-          {submitting ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.primaryButtonText}>Verify</Text>
-          )}
-        </Pressable>
+        />
       </View>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  content: { flex: 1, paddingHorizontal: 24, paddingTop: 48 },
-  title: {
-    ...typography.h1,
-    color: colors.textPrimary,
-    marginBottom: 8,
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginBottom: 32,
-  },
-  otpRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  otpCell: {
-    width: 48,
-    height: 56,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    textAlign: 'center',
-    ...typography.h2,
-    color: colors.textPrimary,
-    backgroundColor: '#FAFAFB',
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonPressed: { backgroundColor: colors.primaryPressed },
-  primaryButtonDisabled: { opacity: 0.7 },
-  primaryButtonText: {
-    ...typography.button,
-    color: '#fff',
-  },
-});

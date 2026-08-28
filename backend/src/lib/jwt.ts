@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 
@@ -10,6 +11,7 @@ export type AccessTokenPayload = {
 export type RefreshTokenPayload = {
   sub: string;
   type: 'refresh';
+  jti: string;
 };
 
 export function signAccessToken(payload: Omit<AccessTokenPayload, 'type'>): string {
@@ -18,10 +20,20 @@ export function signAccessToken(payload: Omit<AccessTokenPayload, 'type'>): stri
   });
 }
 
-export function signRefreshToken(payload: Omit<RefreshTokenPayload, 'type'>): string {
-  return jwt.sign({ ...payload, type: 'refresh' }, env.JWT_REFRESH_SECRET, {
+/**
+ * Sign a refresh token and return both the encoded JWT and the freshly
+ * minted jti. The jti is the row key in the `refresh_tokens` table; the
+ * caller persists it so rotation and reuse detection can find the row
+ * without decoding the token again.
+ */
+export function signRefreshToken(
+  payload: Omit<RefreshTokenPayload, 'type' | 'jti'>,
+): { token: string; jti: string } {
+  const jti = randomUUID();
+  const token = jwt.sign({ ...payload, type: 'refresh', jti }, env.JWT_REFRESH_SECRET, {
     expiresIn: env.JWT_REFRESH_TTL as jwt.SignOptions['expiresIn'],
   });
+  return { token, jti };
 }
 
 export function verifyAccessToken(token: string): AccessTokenPayload {

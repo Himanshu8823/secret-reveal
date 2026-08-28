@@ -26,8 +26,11 @@ function makeLimiter({ keyPrefix, points, durationSeconds }: LimiterOpts) {
   });
 }
 
-// 10 minutes in seconds — shared by all OTP-related limits.
+// Window lengths, in seconds. Each limiter states its duration explicitly so
+// future tuning doesn't ripple across unrelated endpoints.
 const TEN_MIN = 10 * 60;
+
+// --- OTP limits (auth flow) -------------------------------------------------
 
 export const otpRequestByPhoneLimiter = makeLimiter({
   keyPrefix: 'rl:otp:req:phone',
@@ -43,6 +46,37 @@ export const otpRequestByIpLimiter = makeLimiter({
 
 export const otpVerifyByPhoneLimiter = makeLimiter({
   keyPrefix: 'rl:otp:verify:phone',
+  points: 5,
+  durationSeconds: TEN_MIN,
+});
+
+// --- Auth refresh -----------------------------------------------------------
+// Burst control only — reuse-detection (rotated jti + per-family revocation)
+// already handles the actual abuse cases. We just cap raw request rate.
+export const refreshLimiter = makeLimiter({
+  keyPrefix: 'rl:auth:refresh:ip',
+  points: 30,
+  durationSeconds: TEN_MIN,
+});
+
+// --- Posts ------------------------------------------------------------------
+
+export const postCreateLimiter = makeLimiter({
+  keyPrefix: 'rl:posts:create:user',
+  points: 10,
+  durationSeconds: TEN_MIN,
+});
+
+export const postResponseLimiter = makeLimiter({
+  keyPrefix: 'rl:posts:respond:user',
+  points: 30,
+  durationSeconds: TEN_MIN,
+});
+
+// --- Groups -----------------------------------------------------------------
+
+export const groupCreateLimiter = makeLimiter({
+  keyPrefix: 'rl:groups:create:user',
   points: 5,
   durationSeconds: TEN_MIN,
 });

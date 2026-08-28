@@ -7,6 +7,10 @@ vi.mock('../../config/db.js', () => ({
       findUnique: vi.fn(),
       create: vi.fn(),
     },
+    // verifyOtp now calls issueRefresh() which inserts a refresh_tokens row.
+    refreshToken: {
+      create: vi.fn(() => ({})),
+    },
   },
 }));
 vi.mock('../../config/redis.js', () => ({
@@ -18,6 +22,7 @@ vi.mock('../../config/redis.js', () => ({
 }));
 vi.mock('../../config/env.js', () => ({
   env: {
+    NODE_ENV: 'development',
     OTP_TTL_SECONDS: 300,
     JWT_ACCESS_TTL: '15m',
     JWT_REFRESH_TTL: '30d',
@@ -26,7 +31,8 @@ vi.mock('../../config/env.js', () => ({
 }));
 vi.mock('../../lib/jwt.js', () => ({
   signAccessToken: vi.fn(() => 'access.mock'),
-  signRefreshToken: vi.fn(() => 'refresh.mock'),
+  // After Phase 0.4b, signRefreshToken returns { token, jti } not a bare string.
+  signRefreshToken: vi.fn(() => ({ token: 'refresh.mock', jti: 'jti-new' })),
 }));
 
 import { prisma } from '../../config/db.js';
@@ -101,12 +107,12 @@ describe('verifyOtp', () => {
 
     expect(mockRedis.del).toHaveBeenCalledWith('otp:+919999999999');
     expect(mockPrisma.user.create).toHaveBeenCalledWith({ data: { phone: '+919999999999' } });
-    expect(result).toEqual({
-      isNewUser: true,
-      accessToken: 'access.mock',
-      refreshToken: 'refresh.mock',
-      user: { id: 'user-1', phone: '+919999999999', name: null },
-    });
+    expect(result.isNewUser).toBe(true);
+    expect(result.accessToken).toBe('access.mock');
+    expect(result.refreshToken).toBe('refresh.mock');
+    expect(result.user.id).toBe('user-1');
+    expect(result.user.phone).toBe('+919999999999');
+    expect(result.user.name).toBeNull();
   });
 
   it('logs in an existing user without creating a row (isNewUser=false)', async () => {

@@ -1,5 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { useAuthStore } from '../store/authStore';
+import { getRefreshToken, setRefreshToken, clearRefreshToken } from '../utils/secureStorage';
+import { refresh } from './auth.api';
 
 /**
  * Single axios instance. baseURL is read from a public env var (must be
@@ -23,6 +25,58 @@ apiClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// TODO: once authStore exposes `setAccessToken` and `signOut`, prefer those
+// over the setState fallbacks below. The TypeScript check will fail until
+// those exports land.
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function tryRefresh(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const token = await getRefreshToken();
+    if (!token) return null;
+    try {
+      const { accessToken, refreshToken: newRefresh } = await refresh({ refreshToken: token });
+      await setRefreshToken(newRefresh);
+      const setAccessToken = useAuthStore.getState().setAccessToken;
+      if (setAccessToken) {
+        setAccessToken(accessToken);
+      } else {
+        // Fallback if setAccessToken isn't added yet
+        useAuthStore.setState({ accessToken });
+      }
+      return accessToken;
+    } catch {
+      await clearRefreshToken();
+      const signOut = useAuthStore.getState().signOut;
+      if (signOut) {
+        signOut();
+      } else {
+        // Fallback if signOut isn't added yet
+        useAuthStore.setState({ accessToken: null });
+      }
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
+apiClient.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    const original = error.config;
+    if (!original) throw error;
+    if (error.response?.status !== 401 || original._retry) throw error;
+    original._retry = true;
+    const newToken = await tryRefresh();
+    if (!newToken) throw error;
+    original.headers.Authorization = `Bearer ${newToken}`;
+    return apiClient.request(original);
+  },
+);
 
 /**
  * Unwrap the standard backend envelope. Throws an Error with the server's
