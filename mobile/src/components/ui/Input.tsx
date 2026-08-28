@@ -64,7 +64,7 @@ export const Input = forwardRef<TextInput, InputProps>(function Input(
   return (
     <View className={containerClassName}>
       {label ? (
-        <Text variant="bodyStrong" tone="primary" className="mb-1.5">
+        <Text variant="bodyStrong" tone="primary" className="mb-3">
           {label}
         </Text>
       ) : null}

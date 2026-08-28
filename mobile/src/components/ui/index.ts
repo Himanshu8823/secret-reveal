@@ -1,12 +1,17 @@
 /**
  * Single import for all UI primitives:
- *   import { Button, Card, Input, Pill, Text } from '@/components/ui';
+ *   import { Button, Card, Dialog, DialogProvider, Input, Pill, Text, useDialog } from '@/components/ui';
  */
 export { Button } from './Button';
 export type { ButtonProps, ButtonSize, ButtonVariant } from './Button';
 
 export { Card } from './Card';
 export type { CardProps, CardVariant } from './Card';
+
+export { Dialog } from './Dialog';
+export type { DialogAction, DialogOptions, DialogVariant } from './Dialog';
+
+export { DialogProvider, useDialog } from './DialogProvider';
 
 export { Input } from './Input';
 export type { InputProps, InputState } from './Input';

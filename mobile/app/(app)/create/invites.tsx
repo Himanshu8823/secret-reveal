@@ -6,13 +6,12 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { Button, Text } from '../../../src/components/ui';
+import { Button, Text, useDialog } from '../../../src/components/ui';
 import { colors } from '../../../src/theme';
 import { useComposerStore } from '../../../src/store/composerStore';
 import { createGroup, createPost } from '../../../src/api/posts.api';
@@ -47,6 +46,7 @@ export default function CreateInvitesScreen() {
 
   const [localGroupName, setLocalGroupName] = useState(groupName);
   const [submitting, setSubmitting] = useState(false);
+  const dialog = useDialog();
 
   const canPublish =
     !submitting &&
@@ -62,7 +62,12 @@ export default function CreateInvitesScreen() {
     if (!canPublish) return;
     if (timerMinutes === null) {
       // Defensive — the timer screen enforces this, but never trust state.
-      Alert.alert('Pick a timer', 'Go back and choose how long this discussion should run.');
+      dialog.show({
+        variant: 'warning',
+        title: 'Pick a timer',
+        message: 'Go back and choose how long this discussion should run.',
+        actions: [{ label: 'OK' }],
+      });
       return;
     }
     setSubmitting(true);
@@ -83,7 +88,12 @@ export default function CreateInvitesScreen() {
       router.dismissTo('/(app)/home');
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not publish the post.';
-      Alert.alert('Publish failed', message);
+      dialog.show({
+        variant: 'danger',
+        title: 'Publish failed',
+        message,
+        actions: [{ label: 'OK' }],
+      });
     } finally {
       setSubmitting(false);
     }

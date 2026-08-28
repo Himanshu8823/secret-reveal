@@ -5,12 +5,11 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Text } from '../../../src/components/ui';
+import { Button, Text, useDialog } from '../../../src/components/ui';
 import { colors, spacing } from '../../../src/theme';
 import { useComposerStore } from '../../../src/store/composerStore';
 
@@ -34,12 +33,18 @@ export default function CreateCaptionScreen() {
   const caption = useComposerStore((s) => s.caption);
   const setCaption = useComposerStore((s) => s.setCaption);
   const [localCaption, setLocalCaption] = useState(caption);
+  const dialog = useDialog();
 
   const canContinue = localCaption.trim().length >= 1 && localCaption.length <= CAPTION_MAX;
 
   const onNext = () => {
     if (!canContinue) {
-      Alert.alert('Add a caption', 'Write something (1 to 2000 characters).');
+      dialog.show({
+        variant: 'warning',
+        title: 'Add a caption',
+        message: 'Write something (1 to 2000 characters).',
+        actions: [{ label: 'OK' }],
+      });
       return;
     }
     setCaption(localCaption.trim());
@@ -117,7 +122,12 @@ export default function CreateCaptionScreen() {
                 onPress={() => {
                   // Inert in this slice — surface a hint so the tap is
                   // visibly acknowledged without breaking the layout.
-                  Alert.alert('Coming soon', `${opt.label} upload lands in Phase 3b.`);
+                  dialog.show({
+                    variant: 'info',
+                    title: 'Coming soon',
+                    message: `${opt.label} upload lands in Phase 3b.`,
+                    actions: [{ label: 'OK' }],
+                  });
                 }}
                 accessibilityLabel={opt.label}
                 className="w-1/4 aspect-square items-center justify-center px-1.5 my-1.5 active:opacity-70"

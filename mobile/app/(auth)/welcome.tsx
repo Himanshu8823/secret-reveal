@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import {
   View,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Button, Input, Text } from '../../src/components/ui';
+import { Button, Input, Text, useDialog } from '../../src/components/ui';
 import { updateProfile } from '../../src/api/users.api';
 import { useAuthStore } from '../../src/store/authStore';
 import { setStoredUser } from '../../src/utils/secureStorage';
@@ -21,16 +20,27 @@ import { setStoredUser } from '../../src/utils/secureStorage';
 export default function WelcomeScreen() {
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const dialog = useDialog();
 
   const onContinue = async () => {
     if (submitting) return;
     const trimmed = name.trim();
     if (trimmed.length === 0) {
-      Alert.alert('Tell us your name', 'Type at least one character to continue.');
+      dialog.show({
+        variant: 'warning',
+        title: 'Tell us your name',
+        message: 'Type at least one character to continue.',
+        actions: [{ label: 'OK' }],
+      });
       return;
     }
     if (trimmed.length > 60) {
-      Alert.alert('Too long', 'Names must be at most 60 characters.');
+      dialog.show({
+        variant: 'warning',
+        title: 'Too long',
+        message: 'Names must be at most 60 characters.',
+        actions: [{ label: 'OK' }],
+      });
       return;
     }
     setSubmitting(true);
@@ -53,10 +63,12 @@ export default function WelcomeScreen() {
       });
       router.replace('/(app)');
     } catch (e) {
-      Alert.alert(
-        'Could not save name',
-        e instanceof Error ? e.message : 'Try again',
-      );
+      dialog.show({
+        variant: 'danger',
+        title: 'Could not save name',
+        message: e instanceof Error ? e.message : 'Try again',
+        actions: [{ label: 'OK' }],
+      });
     } finally {
       setSubmitting(false);
     }

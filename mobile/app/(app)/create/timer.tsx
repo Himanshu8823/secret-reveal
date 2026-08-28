@@ -5,12 +5,11 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Text } from '../../../src/components/ui';
+import { Button, Text, useDialog } from '../../../src/components/ui';
 import { colors } from '../../../src/theme';
 import { useComposerStore } from '../../../src/store/composerStore';
 
@@ -36,6 +35,7 @@ const CUSTOM_MAX = 1440;
 export default function CreateTimerScreen() {
   const stored = useComposerStore((s) => s.timerMinutes);
   const setTimer = useComposerStore((s) => s.setTimer);
+  const dialog = useDialog();
 
   // Initial selection derives from the store when we revisit the screen.
   const initialKey: PresetKey =
@@ -56,7 +56,12 @@ export default function CreateTimerScreen() {
     if (selected === 'custom') {
       const n = Number(customValue);
       if (!Number.isFinite(n) || n < CUSTOM_MIN || n > CUSTOM_MAX) {
-        Alert.alert('Invalid duration', `Enter between ${CUSTOM_MIN} and ${CUSTOM_MAX} minutes.`);
+        dialog.show({
+          variant: 'warning',
+          title: 'Invalid duration',
+          message: `Enter between ${CUSTOM_MIN} and ${CUSTOM_MAX} minutes.`,
+          actions: [{ label: 'OK' }],
+        });
         return;
       }
       setTimer(Math.floor(n));
