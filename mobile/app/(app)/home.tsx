@@ -34,6 +34,14 @@ export default function HomeScreen() {
   const feedQuery = useQuery({
     queryKey: ['posts', 'feed'],
     queryFn: () => listPosts({ limit: 10 }),
+    // Poll every 60s while the feed is mounted so posts from other
+    // group members land within a minute without needing a WebSocket.
+    // The interval pauses automatically when the query is unmounted
+    // (user navigates away) and resumes on remount. Paired with
+    // refetchOnWindowFocus via the root layout, this gives both
+    // "background → foreground" instant refresh and a continuous
+    // gentle tick while the user is actively browsing.
+    refetchInterval: 60_000,
   });
 
   const onRefresh = useCallback(() => {

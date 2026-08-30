@@ -7,6 +7,7 @@ vi.mock('../../config/db.js', () => ({
     user: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
+      findMany: vi.fn(),
       update: vi.fn(),
     },
     post: {
@@ -52,6 +53,7 @@ import {
   getMyProfile,
   getMyStats,
   updateProfile,
+  listUsers,
 } from './users.service.js';
 import { AppError, ErrorCode } from '../../lib/AppError.js';
 import {
@@ -63,6 +65,7 @@ const mockPrisma = prisma as unknown as {
   user: {
     findUnique: ReturnType<typeof vi.fn>;
     findFirst: ReturnType<typeof vi.fn>;
+    findMany: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
   post: { count: ReturnType<typeof vi.fn> };
@@ -469,5 +472,170 @@ describe('updateProfile', () => {
     expect(__testing.IMMUTABLE_FIELDS.has('username')).toBe(false);
     expect(__testing.IMMUTABLE_FIELDS.has('bio')).toBe(false);
     expect(__testing.IMMUTABLE_FIELDS.has('avatarUrl')).toBe(false);
+  });
+});
+
+describe('listUsers', () => {
+  it('returns the picker entries excluding the caller', async () => {
+    // limit=2 with a 2-row response => no next page.
+    mockPrisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-a',
+        name: 'Alice',
+        username: 'alice_99',
+        avatarUrl: 'https://cdn.example.com/a.png',
+        createdAt: new Date('2026-01-02T00:00:00Z'),
+      },
+      {
+        id: 'user-b',
+        name: 'Bob',
+        username: null,
+        avatarUrl: null,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+
+    const result = await listUsers({ callerId: 'me', limit: 2 });
+
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { not: 'me' } }),
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 3, // limit + 1
+        select: {
+          id: true,
+          name: true,
+          username: true,
+          avatarUrl: true,
+          createdAt: true,
+        },
+      }),
+    );
+    expect(result).toEqual({
+      users: [
+        {
+          id: 'user-a',
+          name: 'Alice',
+          username: 'alice_99',
+          avatarUrl: 'https://cdn.example.com/a.png',
+        },
+        { id: 'user-b', name: 'Bob', username: null, avatarUrl: null },
+      ],
+      nextCursor: null,
+    });
+  });
+
+  it('emits a nextCursor when the response has limit+1 rows', async () => {
+    // limit=2 with 3 rows returned => hasMore = true; we drop the
+    // probe row and emit a cursor based on the last *page* row.
+    mockPrisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-a',
+        name: 'Alice',
+        username: 'alice',
+        avatarUrl: null,
+        createdAt: new Date('2026-01-03T00:00:00Z'),
+      },
+      {
+        id: 'user-b',
+        name: 'Bob',
+        username: 'bob',
+        avatarUrl: null,
+        createdAt: new Date('2026-01-02T00:00:00Z'),
+      },
+      {
+        id: 'user-c',
+        name: 'Carol',
+        username: 'carol',
+        avatarUrl: null,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+
+    const result = await listUsers({ callerId: 'me', limit: 2 });
+
+    expect(result.users).toHaveLength(2);
+    expect(result.nextCursor).not.toBeNull();
+    // Cursor is base64(JSON{t,i}); decode and verify shape.
+    const decoded = JSON.parse(
+      Buffer.from(result.nextCursor as string, 'base64').toString('utf8'),
+    ) as { t: string; i: string };
+    expect(decoded.i).toBe('user-b');
+    expect(decoded.t).toBe('2026-01-02T00:00:00.000Z');
+  });
+
+  it('translates a valid cursor into a WHERE clause', async () => {
+    mockPrisma.user.findMany.mockResolvedValue([]);
+    const cursor = Buffer.from(
+      JSON.stringify({ t: '2026-01-01T00:00:00.000Z', i: 'user-x' }),
+    ).toString('base64');
+
+    await listUsers({ callerId: 'me', limit: 20, cursor });
+
+    // When only the cursor is set (no search), the OR sits at the top
+    // level of `where` alongside the `id: { not: callerId }` filter.
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { not: 'me' },
+          OR: [
+            { createdAt: { lt: new Date('2026-01-01T00:00:00Z') } },
+            {
+              createdAt: new Date('2026-01-01T00:00:00Z'),
+              id: { lt: 'user-x' },
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it('treats a malformed cursor as "no cursor"', async () => {
+    mockPrisma.user.findMany.mockResolvedValue([]);
+    // Not valid base64-of-JSON. The service should silently fall
+    // through to a top-of-list query rather than 400'ing.
+    await listUsers({ callerId: 'me', limit: 20, cursor: '!!!not-base64!!!' });
+
+    const call = mockPrisma.user.findMany.mock.calls[0]?.[0] as {
+      where: Record<string, unknown>;
+    };
+    // Only `id: { not: callerId }` should remain — no AND/OR clauses.
+    expect(call.where).toEqual({ id: { not: 'me' } });
+  });
+
+  it('combines search and cursor with AND so neither is lost', async () => {
+    mockPrisma.user.findMany.mockResolvedValue([]);
+    const cursor = Buffer.from(
+      JSON.stringify({ t: '2026-01-01T00:00:00.000Z', i: 'user-x' }),
+    ).toString('base64');
+
+    await listUsers({
+      callerId: 'me',
+      limit: 20,
+      cursor,
+      search: 'alice',
+    });
+
+    const call = mockPrisma.user.findMany.mock.calls[0]?.[0] as {
+      where: { AND: unknown[] };
+    };
+    // The search OR and cursor OR must both appear inside an AND so
+    // Prisma doesn't drop one with a duplicate-key warning.
+    expect(Array.isArray(call.where.AND)).toBe(true);
+    expect(call.where.AND).toHaveLength(2);
+  });
+
+  it('passes an ILIKE-style search clause when search is provided', async () => {
+    mockPrisma.user.findMany.mockResolvedValue([]);
+
+    await listUsers({ callerId: 'me', limit: 20, search: 'alice' });
+
+    const call = mockPrisma.user.findMany.mock.calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> };
+    };
+    expect(call.where.OR).toEqual([
+      { name: { contains: 'alice', mode: 'insensitive' } },
+      { username: { contains: 'alice', mode: 'insensitive' } },
+    ]);
   });
 });

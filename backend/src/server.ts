@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { ensureBloomLoaded } from './lib/usernameBloom.js';
+import { startRevealWorker, stopRevealWorker } from './workers/revealWorker.js';
 
 const app = buildApp();
 
@@ -16,6 +17,10 @@ void ensureBloomLoaded().catch((err) => {
   logger.warn({ err }, 'username bloom failed to warm at boot');
 });
 
+// Timer-driven reveal: flips posts from 'active' to 'revealed' once their
+// discussion timer elapses. Nothing else in the app performs a reveal.
+startRevealWorker();
+
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, 'backend listening');
 });
@@ -23,6 +28,7 @@ const server = app.listen(env.PORT, () => {
 // Graceful shutdown — let in-flight requests finish on SIGTERM/SIGINT.
 const shutdown = (signal: string) => {
   logger.info({ signal }, 'shutting down');
+  stopRevealWorker();
   server.close(() => process.exit(0));
   // Hard kill after 10s if connections won't drain.
   setTimeout(() => process.exit(1), 10_000).unref();

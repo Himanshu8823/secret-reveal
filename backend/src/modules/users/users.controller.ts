@@ -3,8 +3,9 @@ import {
   getMyProfile as getMyProfileService,
   updateProfile as updateProfileService,
   getMyStats as getMyStatsService,
+  listUsers as listUsersService,
 } from './users.service.js';
-import { updateProfileSchema } from './users.validation.js';
+import { listUsersQuerySchema, updateProfileSchema } from './users.validation.js';
 
 /**
  * Thin controllers. Per CLAUDE.md, business logic lives in the service
@@ -76,6 +77,34 @@ export async function getMyStats(req: Request, res: Response, next: NextFunction
     const user = requireUser(req);
     const stats = await getMyStatsService(user.id);
     res.status(200).json({ success: true, data: stats });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /users?cursor=...&limit=...&search=...
+ *
+ * Powers the composer's member picker (step 3). Per the product rule
+ * the picker shows ALL platform users — no group filter — so this
+ * route does not require a groupId. The caller is excluded so the
+ * picker doesn't list "me" alongside other people.
+ *
+ * Cursor pagination + optional case-insensitive search (`search` matches
+ * against `name` OR `username`). Both are bounded at the controller so
+ * a malformed query becomes a clean 400 via zod, not a 500 from Prisma.
+ */
+export async function getUsers(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const q = listUsersQuerySchema.parse(req.query);
+    const result = await listUsersService({
+      callerId: user.id,
+      cursor: q.cursor,
+      limit: q.limit,
+      search: q.search,
+    });
+    res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

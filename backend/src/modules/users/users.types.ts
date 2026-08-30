@@ -49,3 +49,36 @@ export type UpdateProfileInput = {
  * GET shape later (e.g., omitting createdAt).
  */
 export type UpdateProfileResult = UserProfile;
+
+/**
+ * Member-picker row returned by GET /users. Intentionally narrower than
+ * UserProfile: phone / bio / createdAt aren't useful in the picker, and
+ * the user was explicit about not surfacing data the picker doesn't need.
+ */
+export type UserPickerEntry = {
+  id: string;
+  name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+};
+
+/**
+ * Cursor-paginated result for GET /users. `nextCursor` is the value the
+ * client passes back as `?cursor=` to fetch the next page; null means
+ * "no more pages".
+ */
+export type ListUsersResult = {
+  users: UserPickerEntry[];
+  nextCursor: string | null;
+};
+
+/**
+ * Service-layer input for the picker list. The caller (req.user.id)
+ * is excluded — you can't pick yourself.
+ */
+export type ListUsersInput = {
+  callerId: string;
+  cursor?: string;
+  limit: number;
+  search?: string;
+};

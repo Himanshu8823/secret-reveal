@@ -15,6 +15,7 @@ import { GroupRow } from '../../src/components/GroupRow';
 import { Fab } from '../../src/components/Fab';
 import { EmptyState } from '../../src/components/EmptyState';
 import { Button, Text, useDialog } from '../../src/components/ui';
+import { useRefreshOnFocus } from '../../src/hooks/useRefreshOnFocus';
 import { colors, elevation, radius } from '../../src/theme';
 
 /**
@@ -46,6 +47,13 @@ export default function GroupsScreen() {
     queryKey: ['invites', 'pending'],
     queryFn: () => listPendingInvites(),
   });
+
+  // Refresh when this tab regains focus (e.g. user came back from
+  // creating a post that auto-added them to a new group, or accepted an
+  // invite elsewhere). Skip the first focus — already handled by the
+  // initial mount + refetchOnMount path.
+  useRefreshOnFocus(['groups', 'mine']);
+  useRefreshOnFocus(['invites', 'pending']);
 
   const onRefresh = useCallback(() => {
     groupsQuery.refetch();

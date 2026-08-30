@@ -121,14 +121,22 @@ export async function getPost(postId: string): Promise<PostDetail> {
 
 // --- Create post ----------------------------------------------------------
 
+/**
+ * Inputs for POST /posts.
+ *
+ * The backend resolves the destination Group from the supplied member-set
+ * signature: if a Group with the exact same `memberIds` already exists
+ * (owned by this user), the post joins it; otherwise a new Group is
+ * materialised on the fly. Clients therefore only need to send the
+ * selected people — never a `groupId`.
+ */
 export type CreatePostInput = {
-  groupId: string;
+  /** Selected member user ids. Order-insensitive set on the server side. */
+  memberIds: string[];
   caption: string;
   /** UUIDs of Media rows already uploaded in Phase 3b. */
   mediaIds?: string[];
   timerMinutes: number;
-  /** Pre-accepted invitee ids. Phase 3a defaults to empty. */
-  inviteeIds?: string[];
 };
 
 export type CreatedPost = {

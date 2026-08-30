@@ -14,7 +14,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Button, Text, useDialog } from '../../../src/components/ui';
 import { colors } from '../../../src/theme';
 import { useComposerStore } from '../../../src/store/composerStore';
-import { createGroup, createPost } from '../../../src/api/posts.api';
+import { createPost } from '../../../src/api/posts.api';
 
 // ---------------------------------------------------------------------------
 // Fixture invitees — contact sync lands later. Five fake users with stable
@@ -48,10 +48,14 @@ export default function CreateInvitesScreen() {
   const [submitting, setSubmitting] = useState(false);
   const dialog = useDialog();
 
+  // Group name is OPTIONAL now: the backend resolves / materialises the
+  // Group from the member-set signature, so only the invitee ids matter
+  // on the wire. The field is still rendered for users who want to
+  // label a recurring group (see flagged UX note in the PR description).
+  const trimmedGroupName = localGroupName.trim();
   const canPublish =
     !submitting &&
-    localGroupName.trim().length >= 1 &&
-    localGroupName.trim().length <= GROUP_NAME_MAX &&
+    trimmedGroupName.length <= GROUP_NAME_MAX &&
     invitees.length >= 1 &&
     timerMinutes !== null;
 
@@ -72,20 +76,17 @@ export default function CreateInvitesScreen() {
     }
     setSubmitting(true);
     try {
-      const inviteeIds = invitees.map((i) => i.id);
-      const group = await createGroup({
-        name: localGroupName.trim(),
-        memberIds: inviteeIds,
-      });
+      const memberIds = invitees.map((i) => i.id);
+      // Backend resolves / materialises the Group from the member-set
+      // signature — same memberIds → existing group, new subset → new
+      // group. The optional `groupName` is currently unused on the wire;
+      // it's still persisted on the store for the future when the
+      // backend can accept a name override (see flagged UX note).
       await createPost({
-        groupId: group.id,
+        memberIds,
         caption,
         mediaIds: [],
         timerMinutes,
-        // Pre-accepted invitees — these were already added as group
-        // members in the call above. Passing them again as inviteeIds
-        // persists the accepted GroupInvite rows in the same tx.
-        inviteeIds,
       });
       // Invalidate groups + posts caches so Home refetches when we land
       // there and the new post appears in the "Recent discussions"

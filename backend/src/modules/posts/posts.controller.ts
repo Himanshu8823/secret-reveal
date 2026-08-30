@@ -1,12 +1,17 @@
 import type { Request, Response, NextFunction } from 'express';
 import {
+  createComment as createCommentService,
   createPost as createPostService,
   getPost as getPostService,
+  listComments as listCommentsService,
+  listPosts as listPostsService,
   listResponses as listResponsesService,
   submitResponse as submitResponseService,
 } from './posts.service.js';
 import {
+  createCommentSchema,
   createPostSchema,
+  listPostsQuerySchema,
   postIdParamSchema,
   submitResponseSchema,
 } from './posts.validation.js';
@@ -37,11 +42,34 @@ export async function postCreate(req: Request, res: Response, next: NextFunction
     const result = await createPostService({
       authorId: user.id,
       groupId: body.groupId,
+      memberIds: body.memberIds,
       caption: body.caption,
       mediaIds: body.mediaIds,
       timerMinutes: body.timerMinutes,
     });
     res.status(201).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /posts — feed list.
+ *
+ * Query params: cursor, limit, groupId (optional). Returns post summaries
+ * with counts only — bodies are never sent before reveal.
+ */
+export async function getPosts(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const q = listPostsQuerySchema.parse(req.query);
+    const result = await listPostsService({
+      viewerId: user.id,
+      groupId: q.groupId,
+      cursor: q.cursor,
+      limit: q.limit,
+    });
+    res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);
   }
@@ -75,6 +103,33 @@ export async function postResponse(req: Request, res: Response, next: NextFuncti
     const { id } = postIdParamSchema.parse(req.params);
     const body = submitResponseSchema.parse(req.body);
     const result = await submitResponseService({
+      viewerId: user.id,
+      postId: id,
+      body: body.body,
+    });
+    res.status(201).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getComments(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const result = await listCommentsService(user.id, id);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function postComment(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const body = createCommentSchema.parse(req.body);
+    const result = await createCommentService({
       viewerId: user.id,
       postId: id,
       body: body.body,

@@ -3,8 +3,15 @@ import { z } from 'zod';
 /**
  * POST /posts body.
  *
- * - groupId: must reference an existing group (existence/authorization
- *   checked in the service layer, not here — validation is purely shape).
+ * Two ways to specify the audience, exactly one of which must be present:
+ *
+ * - groupId: legacy flow — caller already picked a group. Must reference
+ *   an existing group (existence/authorization checked in the service
+ *   layer; validation is purely shape).
+ * - memberIds: preferred flow — pass the people to share with and the
+ *   service finds-or-creates the matching group. Two posts with the
+ *   same memberIds hit the same group row.
+ *
  * - caption: 1..2000 chars after trim. The 2000 matches the DB column.
  * - mediaIds: optional, ≤4 entries. Each must be a UUID. Ownership/real-media
  *   verification happens in the service (v1 accepts any UUID; production-grade
@@ -13,27 +20,39 @@ import { z } from 'zod';
  *   defeat the "discussion" mechanic), 24 hour ceiling (anything longer is
  *   essentially "never reveals" and would clog the reveal queue).
  */
-export const createPostSchema = z.object({
-  groupId: z.string().uuid('groupId must be a UUID'),
-  caption: z
-    .string()
-    .transform((s) => s.trim())
-    .pipe(
-      z
-        .string()
-        .min(1, 'Caption is required')
-        .max(2000, 'Caption must be at most 2000 characters'),
-    ),
-  mediaIds: z
-    .array(z.string().uuid('mediaIds must be UUIDs'))
-    .max(4, 'A post can include at most 4 media items')
-    .default([]),
-  timerMinutes: z
-    .number()
-    .int('timerMinutes must be an integer')
-    .min(5, 'timerMinutes must be at least 5')
-    .max(1440, 'timerMinutes must be at most 1440 (24 hours)'),
-});
+export const createPostSchema = z
+  .object({
+    groupId: z.string().uuid('groupId must be a UUID').optional(),
+    memberIds: z
+      .array(z.string().uuid('memberIds must be UUIDs'))
+      .max(20, 'A post can be shared with at most 20 members')
+      .optional(),
+    caption: z
+      .string()
+      .transform((s) => s.trim())
+      .pipe(
+        z
+          .string()
+          .min(1, 'Caption is required')
+          .max(2000, 'Caption must be at most 2000 characters'),
+      ),
+    mediaIds: z
+      .array(z.string().uuid('mediaIds must be UUIDs'))
+      .max(4, 'A post can include at most 4 media items')
+      .default([]),
+    timerMinutes: z
+      .number()
+      .int('timerMinutes must be an integer')
+      .min(5, 'timerMinutes must be at least 5')
+      .max(1440, 'timerMinutes must be at most 1440 (24 hours)'),
+  })
+  .refine(
+    (b) => Boolean(b.groupId) !== Boolean(b.memberIds && b.memberIds.length > 0),
+    {
+      message: 'Provide exactly one of groupId or memberIds',
+      path: ['groupId'],
+    },
+  );
 
 export type CreatePostBody = z.infer<typeof createPostSchema>;
 
@@ -63,3 +82,39 @@ export const postIdParamSchema = z.object({
 });
 
 export type PostIdParam = z.infer<typeof postIdParamSchema>;
+
+/**
+ * GET /posts query — feed list.
+ *
+ *   - cursor: opaque string from a previous page's nextCursor
+ *   - limit:  1..50, defaults to 20 (matches the groups module)
+ *   - groupId: optional UUID filter for the per-group feed
+ */
+export const listPostsQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(20),
+  groupId: z.string().uuid('groupId must be a UUID').optional(),
+});
+
+export type ListPostsQuery = z.infer<typeof listPostsQuerySchema>;
+
+/**
+ * POST /posts/:id/comments body.
+ *
+ * Comments follow the same shape as responses: 1..1000 chars after trim
+ * (the Comment.body column is VARCHAR(1000), distinct from Response.body
+ * at 2000 because meta-discussion tolerates shorter messages).
+ */
+export const createCommentSchema = z.object({
+  body: z
+    .string()
+    .transform((s) => s.trim())
+    .pipe(
+      z
+        .string()
+        .min(1, 'Comment body is required')
+        .max(1000, 'Comment must be at most 1000 characters'),
+    ),
+});
+
+export type CreateCommentBody = z.infer<typeof createCommentSchema>;

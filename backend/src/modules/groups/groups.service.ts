@@ -3,115 +3,26 @@ import { prisma } from '../../config/db.js';
 import { AppError, ErrorCode } from '../../lib/AppError.js';
 import { logger } from '../../lib/logger.js';
 import type {
-  AcceptInviteInput,
-  CreateGroupInput,
+  FindOrCreateGroupByMembersInput,
+  FindOrCreateGroupByMembersResult,
   GroupMemberSummary,
   GroupSummary,
   GroupWithMembers,
-  InviteSummary,
   LeaveGroupInput,
   ListMyGroupsInput,
   ListMyGroupsResult,
-  ListPendingInvitesResult,
-  RejectInviteInput,
-  SendInvitesInput,
-  SendInvitesResult,
 } from './groups.types.js';
 
 /**
  * Groups service — business logic lives here per CLAUDE.md. Controllers
  * stay thin and only translate HTTP <-> service inputs.
  *
- * Invites are phone-number keyed: the requester submits E.164 numbers,
- * the service looks up (or creates) User rows by phone, and writes a
- * GroupInvite row per unique non-creator phone. Unknown phones get a
- * placeholder User (no name) so the FK is satisfied and the invite can
- * be accepted when the recipient signs up via OTP.
+ * Product rule: a Group IS its member set. There is no owner, no roles,
+ * no admin, no invite flow. The only way to become a member is to be
+ * included in the audience of a post (handled by
+ * findOrCreateGroupByMembers). Groups are never created explicitly; they
+ * materialise from the member set the first time a post selects it.
  */
-
-/**
- * Create a group, auto-add the creator as the sole initial member, and
- * optionally send invites by phone number — all in one transaction so
- * either everything lands or nothing does.
- *
- * The creator is always a member from the start. Invited phones are NOT
- * added as members until they accept; they sit in the pending invites
- * queue and become members on accept.
- */
-export async function createGroup(input: CreateGroupInput): Promise<GroupWithMembers> {
-  const { creatorId, name, phoneNumbers } = input;
-
-  const trimmedName = name.trim();
-  if (trimmedName.length === 0) {
-    throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Name is required');
-  }
-
-  // Reject duplicate names per creator. Two different users can both
-  // have a "Friends" group, but one user can't have two with the same
-  // name — keeps the home screen legible.
-  const dup = await prisma.group.findFirst({
-    where: { createdById: creatorId, name: trimmedName },
-    select: { id: true },
-  });
-  if (dup) {
-    throw new AppError(
-      409,
-      ErrorCode.VALIDATION_FAILED,
-      'You already have a group with this name',
-    );
-  }
-
-  const group = await prisma.$transaction(async (tx) => {
-    const created = await tx.group.create({
-      data: {
-        name: trimmedName,
-        createdById: creatorId,
-        members: {
-          create: [{ userId: creatorId, role: 'owner' }],
-        },
-      },
-      include: {
-        members: {
-          include: {
-            user: { select: { id: true, name: true, phone: true } },
-          },
-          orderBy: { joinedAt: 'asc' },
-        },
-      },
-    });
-    return created;
-  });
-
-  // Invites are sent AFTER the group exists, in a separate step. We don't
-  // need to roll back the group if a phone number is malformed — the
-  // validation layer already rejected those — but we DO want to bump
-  // `lastActivityAt` if any invite actually lands. `sendInvites` handles
-  // deduping against already-pending/in-group phones itself.
-  if (phoneNumbers.length > 0) {
-    await sendInvites({ inviterId: creatorId, groupId: group.id, phoneNumbers });
-  }
-
-  logger.info(
-    { groupId: group.id, creatorId, inviteCount: phoneNumbers.length },
-    'group created',
-  );
-
-  return {
-    id: group.id,
-    name: group.name,
-    createdById: group.createdById,
-    lastActivityAt: group.lastActivityAt,
-    createdAt: group.createdAt,
-    updatedAt: group.updatedAt,
-    members: group.members.map<GroupMemberSummary>((m) => ({
-      userId: m.userId,
-      name: m.user.name,
-      phone: m.user.phone,
-      role: m.role,
-      joinedAt: m.joinedAt,
-    })),
-  };
-}
 
 /**
  * List groups the caller is a member of, sorted by lastActivityAt DESC.
@@ -177,7 +88,6 @@ export async function listMyGroups(input: ListMyGroupsInput): Promise<ListMyGrou
   const groups: GroupSummary[] = page.map((g) => ({
     id: g.id,
     name: g.name,
-    createdById: g.createdById,
     lastActivityAt: g.lastActivityAt,
     createdAt: g.createdAt,
     memberCount: g._count.members,
@@ -218,7 +128,6 @@ export async function getGroup(
   return {
     id: group.id,
     name: group.name,
-    createdById: group.createdById,
     lastActivityAt: group.lastActivityAt,
     createdAt: group.createdAt,
     updatedAt: group.updatedAt,
@@ -226,369 +135,24 @@ export async function getGroup(
       userId: m.userId,
       name: m.user.name,
       phone: m.user.phone,
-      role: m.role,
       joinedAt: m.joinedAt,
     })),
   };
 }
 
-// ---------------------------------------------------------------------------
-// Invites
-// ---------------------------------------------------------------------------
-
 /**
- * Resolve E.164 phones to User rows. Unknown phones get a placeholder User
- * (no name) so a future OTP-based signup can claim the same row by phone —
- * that's how the invite flows into a brand-new account.
+ * Leave a group. Every member can leave freely — there is no creator
+ * concept and therefore no "creator cannot leave" carve-out.
  *
- * Returns the User rows in the same order as `phones` (deduped). The
- * `createMissing` flag controls whether unknown phones get a placeholder
- * row (true on initial send) or are just dropped (false on re-send where
- * we only want to act on existing users).
- */
-async function ensureUsersByPhone(
-  phones: string[],
-  tx: Prisma.TransactionClient,
-): Promise<Map<string, { id: string; phone: string }>> {
-  const unique = Array.from(new Set(phones));
-  if (unique.length === 0) return new Map();
-
-  const existing = await tx.user.findMany({
-    where: { phone: { in: unique } },
-    select: { id: true, phone: true },
-  });
-  const byPhone = new Map<string, { id: string; phone: string }>();
-  for (const u of existing) byPhone.set(u.phone, u);
-
-  // For unknown phones, create placeholder user rows. They have no name
-  // and no OTP history; signing up via OTP later fills the name.
-  const missing = unique.filter((p) => !byPhone.has(p));
-  for (const phone of missing) {
-    try {
-      const created = await tx.user.create({
-        data: { phone },
-        select: { id: true, phone: true },
-      });
-      byPhone.set(created.phone, created);
-    } catch (err) {
-      // P2002 = unique violation on phone. A concurrent caller created the
-      // row between our findMany and create — fetch it and proceed.
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === 'P2002'
-      ) {
-        const raced = await tx.user.findUnique({
-          where: { phone },
-          select: { id: true, phone: true },
-        });
-        if (raced) byPhone.set(raced.phone, raced);
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  return byPhone;
-}
-
-/**
- * Send invites by phone number. The inviter must be a member of the
- * group. Phones that already have a pending invite or are already members
- * are silently skipped (idempotent — re-tapping the row is a no-op).
- *
- * `lastActivityAt` is bumped only if at least one new invite lands —
- * otherwise the activity timestamp would reflect a useless "send" call.
- */
-export async function sendInvites(input: SendInvitesInput): Promise<SendInvitesResult> {
-  const { inviterId, groupId, phoneNumbers } = input;
-
-  // Membership gate. The validation layer has already enforced uniqueness
-  // + format, but we still need to make sure the inviter belongs to the
-  // group they're inviting people into.
-  const inviterMembership = await prisma.groupMember.findUnique({
-    where: { groupId_userId: { groupId, userId: inviterId } },
-    select: { userId: true },
-  });
-  if (!inviterMembership) {
-    throw new AppError(403, ErrorCode.FORBIDDEN, 'Not a member of this group');
-  }
-
-  // Defensive 404 — a clearly-bad groupId should be obvious, not a 403.
-  const groupExists = await prisma.group.findUnique({
-    where: { id: groupId },
-    select: { id: true },
-  });
-  if (!groupExists) {
-    throw new AppError(404, ErrorCode.NOT_FOUND, 'Group not found');
-  }
-
-  // Resolve inviter's phone so we don't invite ourselves (the schema's
-  // unique([groupId, inviteeId]) would reject it with a 500 otherwise).
-  const inviter = await prisma.user.findUnique({
-    where: { id: inviterId },
-    select: { phone: true },
-  });
-  const phonesToInvite = inviter
-    ? phoneNumbers.filter((p) => p !== inviter.phone)
-    : phoneNumbers;
-
-  if (phonesToInvite.length === 0) {
-    return { created: 0 };
-  }
-
-  const now = new Date();
-  const created = await prisma.$transaction(async (tx) => {
-    const usersByPhone = await ensureUsersByPhone(phonesToInvite, tx);
-
-    // Skip users that are already members of the group — inviting them
-    // again would just be noise. The schema's unique on (groupId,
-    // inviteeId) would also reject it with a 500, so we filter first.
-    const existingMembers = await tx.groupMember.findMany({
-      where: {
-        groupId,
-        userId: { in: Array.from(usersByPhone.values()).map((u) => u.id) },
-      },
-      select: { userId: true },
-    });
-    const memberIds = new Set(existingMembers.map((m) => m.userId));
-
-    // Skip users that already have a pending invite to this group.
-    // The unique constraint is on (groupId, inviteeId) regardless of
-    // status — so a previously-accepted or rejected invite would still
-    // collide. Filter those out too.
-    const existingInvites = await tx.groupInvite.findMany({
-      where: {
-        groupId,
-        inviteeId: { in: Array.from(usersByPhone.values()).map((u) => u.id) },
-      },
-      select: { inviteeId: true, status: true },
-    });
-    const pendingInviteeIds = new Set(
-      existingInvites.filter((i) => i.status === 'pending').map((i) => i.inviteeId),
-    );
-    const anyExistingInviteeIds = new Set(existingInvites.map((i) => i.inviteeId));
-
-    let createdCount = 0;
-    for (const phone of phonesToInvite) {
-      const u = usersByPhone.get(phone);
-      if (!u) continue; // safety: ensureUsersByPhone guarantees presence
-      if (memberIds.has(u.id)) continue;
-      if (anyExistingInviteeIds.has(u.id)) continue;
-
-      try {
-        await tx.groupInvite.create({
-          data: {
-            groupId,
-            inviterId,
-            inviteeId: u.id,
-            status: 'pending',
-          },
-        });
-        createdCount += 1;
-      } catch (err) {
-        // P2002 = unique violation. Another caller raced us — treat as no-op.
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2002'
-        ) {
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    if (createdCount > 0) {
-      await tx.group.update({
-        where: { id: groupId },
-        data: { lastActivityAt: now },
-      });
-    }
-
-    // pendingInviteeIds is intentionally not consumed further — it's read
-    // here so the linter / future readers see the intent ("we deliberately
-    // skip pending invites too"). Cast to `void` to silence the warning.
-    void pendingInviteeIds;
-
-    return createdCount;
-  });
-
-  logger.info(
-    { groupId, inviterId, requested: phonesToInvite.length, created },
-    'invites sent',
-  );
-
-  return { created };
-}
-
-/**
- * List invites sent TO `userId` with status='pending'. Includes group name
- * + inviter name so the mobile UI can render a useful row without an
- * extra round-trip per invite.
- */
-export async function listPendingInvites(
-  userId: string,
-): Promise<ListPendingInvitesResult> {
-  const rows = await prisma.groupInvite.findMany({
-    where: { inviteeId: userId, status: 'pending' },
-    orderBy: { createdAt: 'desc' },
-    include: {
-      group: { select: { id: true, name: true } },
-      inviter: { select: { id: true, name: true } },
-    },
-  });
-
-  const invites: InviteSummary[] = rows.map((r) => ({
-    id: r.id,
-    groupId: r.groupId,
-    groupName: r.group.name,
-    inviterId: r.inviterId,
-    inviterName: r.inviter.name,
-    inviteeId: r.inviteeId,
-    status: r.status as 'pending' | 'accepted' | 'rejected',
-    createdAt: r.createdAt,
-  }));
-
-  return { invites };
-}
-
-/**
- * Accept an invite. Atomic: invite status flips AND the GroupMember row
- * is created in one transaction. The unique on (groupId, inviteeId)
- * would otherwise let two racing accepts double-write — the second one
- * fails with a Prisma error we map to a clean conflict.
- */
-export async function acceptInvite(input: AcceptInviteInput): Promise<InviteSummary> {
-  const { inviteId, userId } = input;
-
-  const invite = await prisma.groupInvite.findUnique({
-    where: { id: inviteId },
-    include: {
-      group: { select: { id: true, name: true } },
-      inviter: { select: { id: true, name: true } },
-    },
-  });
-
-  if (!invite) {
-    throw new AppError(404, ErrorCode.NOT_FOUND, 'Invite not found');
-  }
-  if (invite.inviteeId !== userId) {
-    // Don't leak the invite's existence to someone other than the invitee.
-    throw new AppError(403, ErrorCode.FORBIDDEN, 'Not your invite');
-  }
-  if (invite.status !== 'pending') {
-    throw new AppError(
-      409,
-      ErrorCode.VALIDATION_FAILED,
-      `Invite is already ${invite.status}`,
-    );
-  }
-
-  const now = new Date();
-  await prisma.$transaction(async (tx) => {
-    await tx.groupInvite.update({
-      where: { id: inviteId },
-      data: { status: 'accepted', respondedAt: now },
-    });
-    try {
-      await tx.groupMember.create({
-        data: { groupId: invite.groupId, userId, role: 'member' },
-      });
-    } catch (err) {
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === 'P2002'
-      ) {
-        // The user is already a member (e.g., a previous accepted invite).
-        // We still flipped status, so the state is consistent.
-        return;
-      }
-      throw err;
-    }
-    await tx.group.update({
-      where: { id: invite.groupId },
-      data: { lastActivityAt: now },
-    });
-  });
-
-  logger.info({ inviteId, groupId: invite.groupId, userId }, 'invite accepted');
-
-  return {
-    id: invite.id,
-    groupId: invite.groupId,
-    groupName: invite.group.name,
-    inviterId: invite.inviterId,
-    inviterName: invite.inviter.name,
-    inviteeId: invite.inviteeId,
-    status: 'accepted',
-    createdAt: invite.createdAt,
-  };
-}
-
-/**
- * Reject an invite. Idempotent for already-rejected invites, but a
- * second accept-after-reject returns a clean 409 (the row's status is
- * no longer pending).
- */
-export async function rejectInvite(input: RejectInviteInput): Promise<InviteSummary> {
-  const { inviteId, userId } = input;
-
-  const invite = await prisma.groupInvite.findUnique({
-    where: { id: inviteId },
-    include: {
-      group: { select: { id: true, name: true } },
-      inviter: { select: { id: true, name: true } },
-    },
-  });
-
-  if (!invite) {
-    throw new AppError(404, ErrorCode.NOT_FOUND, 'Invite not found');
-  }
-  if (invite.inviteeId !== userId) {
-    throw new AppError(403, ErrorCode.FORBIDDEN, 'Not your invite');
-  }
-  if (invite.status !== 'pending') {
-    throw new AppError(
-      409,
-      ErrorCode.VALIDATION_FAILED,
-      `Invite is already ${invite.status}`,
-    );
-  }
-
-  const now = new Date();
-  const updated = await prisma.groupInvite.update({
-    where: { id: inviteId },
-    data: { status: 'rejected', respondedAt: now },
-    include: {
-      group: { select: { id: true, name: true } },
-      inviter: { select: { id: true, name: true } },
-    },
-  });
-
-  logger.info({ inviteId, groupId: invite.groupId, userId }, 'invite rejected');
-
-  return {
-    id: updated.id,
-    groupId: updated.groupId,
-    groupName: updated.group.name,
-    inviterId: updated.inviterId,
-    inviterName: updated.inviter.name,
-    inviteeId: updated.inviteeId,
-    status: 'rejected',
-    createdAt: updated.createdAt,
-  };
-}
-
-/**
- * Leave a group. The creator cannot leave — they have to delete the group
- * (which isn't a v1 endpoint, so today creator-leave just rejects with
- * a clear message).
+ * No need to bump `lastActivityAt` on leave — leaving doesn't move the
+ * group's relevance up in anyone's feed.
  */
 export async function leaveGroup(input: LeaveGroupInput): Promise<void> {
   const { userId, groupId } = input;
 
   const group = await prisma.group.findUnique({
     where: { id: groupId },
-    select: { id: true, createdById: true },
+    select: { id: true },
   });
   if (!group) {
     throw new AppError(404, ErrorCode.NOT_FOUND, 'Group not found');
@@ -601,19 +165,206 @@ export async function leaveGroup(input: LeaveGroupInput): Promise<void> {
   if (!membership) {
     throw new AppError(403, ErrorCode.FORBIDDEN, 'Not a member of this group');
   }
-  if (group.createdById === userId) {
-    throw new AppError(
-      409,
-      ErrorCode.VALIDATION_FAILED,
-      'Group creator cannot leave; delete the group instead',
-    );
-  }
 
-  // No need to bump `lastActivityAt` on leave — leaving doesn't move the
-  // group's relevance up in anyone's feed.
   await prisma.groupMember.delete({
     where: { groupId_userId: { groupId, userId } },
   });
 
   logger.info({ groupId, userId }, 'member left group');
+}
+
+// ---------------------------------------------------------------------------
+// Find-or-create by member set
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the canonical "member set signature" for a group: a sorted,
+ * comma-joined string of every member's user id (with the creator
+ * included). The creator is always part of the set — even when the caller
+ * only passes invitee ids, the creator is folded in before sorting, so
+ * a post authored by user X to invitees {A,B,C} and one authored by X
+ * to {B,C,A} hit the same signature and therefore the same row.
+ *
+ * Public so the posts service (and tests) can reuse it without
+ * recomputing.
+ */
+export function buildMemberSignature(creatorId: string, memberIds: string[]): string {
+  const set = new Set<string>([creatorId, ...memberIds]);
+  return Array.from(set).sort().join(',');
+}
+
+/**
+ * Resolve a group to a member set, creating one if no group exists yet
+ * with that exact membership.
+ *
+ * This is the post-creation entrypoint: instead of the client picking
+ * a group, it picks a member list, and we either reuse an existing group
+ * with the same members or create a new one. A group's identity is its
+ * member set, not its name — so {A,B,C,D} reused twice in a row maps to
+ * one group, while {A,B} (a subset that wasn't a group before) creates a
+ * fresh row.
+ *
+ * Race handling: if two concurrent calls find no match and both try to
+ * create, the unique partial index on `groups.memberSignature` will let
+ * exactly one create succeed; the loser catches a P2002 and re-reads the
+ * now-existing row.
+ *
+ * Derived name: when creating, we name the group from its members'
+ * display names ("A, B, C") so the legacy `Group.name NOT NULL` column
+ * stays satisfied. Empty names fall back to "Untitled".
+ */
+export async function findOrCreateGroupByMembers(
+  input: FindOrCreateGroupByMembersInput,
+): Promise<FindOrCreateGroupByMembersResult> {
+  const { creatorId, memberIds } = input;
+
+  // Build the unique signature for this member set.
+  const memberSignature = buildMemberSignature(creatorId, memberIds);
+
+  // Fast path — group already exists with this signature. We use findFirst
+  // (not findUnique) because memberSignature is nullable in the schema, and
+  // Prisma only generates findUnique shortcuts for non-nullable @unique
+  // columns. The lookup is still constant-time because of the partial
+  // UNIQUE index in the migration.
+  const existing = await prisma.group.findFirst({
+    where: { memberSignature },
+    select: {
+      id: true,
+      name: true,
+      lastActivityAt: true,
+      createdAt: true,
+      _count: { select: { members: true } },
+    },
+  });
+  if (existing) {
+    return {
+      group: {
+        id: existing.id,
+        name: existing.name,
+        lastActivityAt: existing.lastActivityAt,
+        createdAt: existing.createdAt,
+        memberCount: existing._count.members,
+        latestPost: null,
+      },
+      created: false,
+    };
+  }
+
+  // Slow path — derive a display name for the new group. We only need the
+  // members listed in `memberIds` plus the creator; everyone gets a row in
+  // the same create call.
+  const allIds = Array.from(new Set<string>([creatorId, ...memberIds]));
+  const memberRows = await prisma.user.findMany({
+    where: { id: { in: allIds } },
+    select: { id: true, name: true },
+  });
+  const nameById = new Map<string, string | null>(
+    memberRows.map((u: { id: string; name: string | null }) => [u.id, u.name]),
+  );
+  const namesForLabel = allIds
+    .map((id: string) => nameById.get(id) ?? null)
+    .filter((n: string | null): n is string => typeof n === 'string' && n.length > 0);
+  const derivedName =
+    namesForLabel.length > 0 ? namesForLabel.join(', ') : 'Untitled';
+
+  // Validate every invitee id resolves to a real user before we attempt
+  // the create. If any are missing, surface a per-id NOT_FOUND so the
+  // caller knows exactly which id is bad.
+  const cleanedMemberIds = memberIds.filter((id: string) => id !== creatorId);
+  if (cleanedMemberIds.length > 0) {
+    const found = await prisma.user.findMany({
+      where: { id: { in: cleanedMemberIds } },
+      select: { id: true },
+    });
+    const foundIds = new Set(found.map((u: { id: string }) => u.id));
+    const missing = cleanedMemberIds.filter((id: string) => !foundIds.has(id));
+    if (missing.length > 0) {
+      throw new AppError(
+        404,
+        ErrorCode.NOT_FOUND,
+        `Unknown user id(s): ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}`,
+      );
+    }
+  }
+
+  let createdRow: {
+    id: string;
+    name: string;
+    lastActivityAt: Date;
+    createdAt: Date;
+    _count: { members: number };
+  };
+  try {
+    createdRow = await prisma.$transaction(async (tx) => {
+      const created = await tx.group.create({
+        data: {
+          name: derivedName,
+          memberSignature,
+          members: {
+            create: [
+              { userId: creatorId },
+              ...cleanedMemberIds.map((userId) => ({ userId })),
+            ],
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          lastActivityAt: true,
+          createdAt: true,
+          _count: { select: { members: true } },
+        },
+      });
+      return created;
+    });
+  } catch (err) {
+    // P2002 = unique violation on the partial-unique memberSignature index.
+    // Another caller raced us and created the group first — re-read it and
+    // return that as the "existing" path. This is the only race worth
+    // handling here: a parallel create would otherwise leave two callers
+    // each holding their own group row for the same member set.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const raced = await prisma.group.findFirst({
+        where: { memberSignature },
+        select: {
+          id: true,
+          name: true,
+          lastActivityAt: true,
+          createdAt: true,
+          _count: { select: { members: true } },
+        },
+      });
+      if (raced) {
+        return {
+          group: {
+            id: raced.id,
+            name: raced.name,
+            lastActivityAt: raced.lastActivityAt,
+            createdAt: raced.createdAt,
+            memberCount: raced._count.members,
+            latestPost: null,
+          },
+          created: false,
+        };
+      }
+    }
+    throw err;
+  }
+
+  logger.info(
+    { groupId: createdRow.id, creatorId, memberCount: allIds.length },
+    'group auto-created by member set',
+  );
+
+  return {
+    group: {
+      id: createdRow.id,
+      name: createdRow.name,
+      lastActivityAt: createdRow.lastActivityAt,
+      createdAt: createdRow.createdAt,
+      memberCount: createdRow._count.members,
+      latestPost: null,
+    },
+    created: true,
+  };
 }

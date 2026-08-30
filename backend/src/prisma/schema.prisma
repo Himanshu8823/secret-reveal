@@ -22,10 +22,7 @@ model User {
   updatedAt DateTime @updatedAt    @db.Timestamptz(6)
 
   refreshTokens  RefreshToken[]
-  createdGroups  Group[]         @relation("groupCreator")
   memberships    GroupMember[]
-  sentInvites    GroupInvite[]   @relation("inviter")
-  receivedInvites GroupInvite[]  @relation("invitee")
   authoredPosts  Post[]          @relation("author")
   responses      Response[]
   reactions      Reaction[]
@@ -57,25 +54,30 @@ model RefreshToken {
 model Group {
   id              String   @id @default(uuid()) @db.Uuid
   name            String   @db.VarChar(60)
-  createdById     String   @db.Uuid
+  // Sorted, comma-joined user ids of every member (including the creator).
+  // A group's identity is its member set, not its name: two groups with the
+  // same signature resolve to the same row. NULL for legacy rows created
+  // before this column landed — those stay queryable by id but won't be
+  // matched by findOrCreateGroupByMembers.
+  memberSignature String?  @db.VarChar(2000)
   lastActivityAt  DateTime @default(now()) @db.Timestamptz(6)
   createdAt       DateTime @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime @updatedAt          @db.Timestamptz(6)
 
-  createdBy User           @relation("groupCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  members   GroupMember[]
-  invites   GroupInvite[]
-  posts     Post[]
+  members GroupMember[]
+  posts   Post[]
 
-  @@index([createdById])
   @@index([lastActivityAt(sort: Desc)])
+  // Partial UNIQUE so that multiple legacy rows with NULL stay non-colliding
+  // while new rows with the same signature collapse into one. Enforced via
+  // the migration's CREATE UNIQUE INDEX ... WHERE "memberSignature" IS NOT NULL
+  // because Prisma's @unique treats NULLs as distinct at the DB level.
   @@map("groups")
 }
 
 model GroupMember {
   groupId  String   @db.Uuid
   userId   String   @db.Uuid
-  role     String   @default("member") @db.VarChar(20)  // 'member' only in v1
   joinedAt DateTime @default(now()) @db.Timestamptz(6)
 
   group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -84,25 +86,6 @@ model GroupMember {
   @@id([groupId, userId])
   @@index([userId])
   @@map("group_members")
-}
-
-model GroupInvite {
-  id          String   @id @default(uuid()) @db.Uuid
-  groupId     String   @db.Uuid
-  inviterId   String   @db.Uuid
-  inviteeId   String   @db.Uuid
-  status      String   @default("pending") @db.VarChar(20)  // pending | accepted | rejected
-  respondedAt DateTime?
-  createdAt   DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt          @db.Timestamptz(6)
-
-  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  inviter User  @relation("inviter", fields: [inviterId], references: [id], onDelete: Cascade)
-  invitee User  @relation("invitee", fields: [inviteeId], references: [id], onDelete: Cascade)
-
-  @@unique([groupId, inviteeId])
-  @@index([inviteeId, status])
-  @@map("group_invites")
 }
 
 model Media {

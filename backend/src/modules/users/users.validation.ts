@@ -65,3 +65,42 @@ export const updateProfileSchema = z
   .strict();
 
 export type UpdateProfileBody = z.infer<typeof updateProfileSchema>;
+
+/**
+ * GET /users query.
+ *
+ * Powers the composer's member picker (step 3). Per the product rule:
+ * the picker shows ALL platform users, no filter — so the route does
+ * not require a groupId. Optional `search` narrows by name/username
+ * prefix-style match on the server so the picker stays fast as the
+ * user count grows.
+ *
+ *   - cursor: opaque string produced by the server on the previous page
+ *   - limit:  1..50, defaults to 30 (picker-friendly page size)
+ *   - search: optional, 1..40 chars; trimmed and matched case-insensitively
+ *             against `name` OR `username` via SQL OR.
+ */
+export const listUsersQuerySchema = z
+  .object({
+    cursor: z.string().min(1).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .optional()
+      .default(30),
+    search: z
+      .string()
+      .transform((s) => s.trim())
+      .pipe(
+        z
+          .string()
+          .min(1, 'search must be at least 1 character')
+          .max(40, 'search must be at most 40 characters'),
+      )
+      .optional(),
+  })
+  .strict();
+
+export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;

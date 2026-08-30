@@ -7,8 +7,11 @@ import {
 } from '../../lib/usernameBloom.js';
 import { logger } from '../../lib/logger.js';
 import type {
+  ListUsersInput,
+  ListUsersResult,
   UpdateProfileInput,
   UpdateProfileResult,
+  UserPickerEntry,
   UserProfile,
   UserStats,
 } from './users.types.js';
@@ -236,3 +239,122 @@ export async function getMyStats(userId: string): Promise<UserStats> {
  * allow-list.
  */
 export const __testing = { IMMUTABLE_FIELDS };
+
+// --- Member picker list -----------------------------------------------------
+
+/**
+ * Decode the (createdAt, id) cursor produced by listUsers. Returns
+ * undefined on any failure — a bad cursor silently restarts pagination
+ * from the top (same convention used elsewhere in the codebase).
+ */
+function decodeListUsersCursor(
+  cursor: string | undefined,
+): { createdAt: Date; id: string } | undefined {
+  if (!cursor) return undefined;
+  try {
+    const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8')) as {
+      t?: unknown;
+      i?: unknown;
+    };
+    if (typeof decoded.t === 'string' && typeof decoded.i === 'string') {
+      return { createdAt: new Date(decoded.t), id: decoded.i };
+    }
+  } catch {
+    // fall through — bad cursor treated as "no cursor"
+  }
+  return undefined;
+}
+
+/**
+ * List users for the composer's member picker.
+ *
+ * Per the product rule: the picker shows ALL platform users, no group
+ * filter, so this route does not require a groupId. The caller is
+ * excluded — you can't pick yourself.
+ *
+ * Search: case-insensitive prefix-style match on `name` OR `username`.
+ * We use Postgres `ILIKE` rather than full-text search because the
+ * picker needs sub-50ms feel; with a real index this scales comfortably
+ * to ~100K users before we'd want to revisit (trigram extension or
+ * server-side search). Per CLAUDE.md: no speculative infrastructure —
+ * this stays a plain Prisma query.
+ *
+ * Cursor pagination on (createdAt, id) DESC, base64-encoded. Fetch
+ * limit+1 to detect the next page without a second query.
+ */
+export async function listUsers(input: ListUsersInput): Promise<ListUsersResult> {
+  const { callerId, cursor, limit, search } = input;
+
+  const cursorClause = decodeListUsersCursor(cursor);
+
+  // Build the search OR (name OR username match) and the cursor OR
+  // (createdAt< OR createdAt=AND id<). Combine with AND when both are
+  // present so we don't lose either filter — Prisma would otherwise
+  // silently let one overwrite the other.
+  const searchOr = search
+    ? {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' as const } },
+          { username: { contains: search, mode: 'insensitive' as const } },
+        ],
+      }
+    : null;
+  const cursorOr = cursorClause
+    ? {
+        OR: [
+          { createdAt: { lt: cursorClause.createdAt } },
+          {
+            createdAt: cursorClause.createdAt,
+            id: { lt: cursorClause.id },
+          },
+        ],
+      }
+    : null;
+
+  // Combine search and cursor via AND so each filter narrows the result.
+  const textFilter =
+    searchOr && cursorOr
+      ? { AND: [searchOr, cursorOr] }
+      : searchOr ?? cursorOr ?? {};
+
+  const rows = await prisma.user.findMany({
+    where: {
+      // Exclude the caller — the picker shouldn't list "me" alongside
+      // other people. This is a soft filter; it's still safe to pick
+      // yourself by id if a deeper endpoint ever needs to, but the
+      // picker UI never shows the caller.
+      id: { not: callerId },
+      ...textFilter,
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1,
+    select: {
+      id: true,
+      name: true,
+      username: true,
+      avatarUrl: true,
+      // createdAt drives the cursor — must be in the select for the
+      // page->nextCursor step below.
+      createdAt: true,
+    },
+  });
+
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
+  const nextCursor =
+    hasMore && last
+      ? Buffer.from(
+          JSON.stringify({ t: last.createdAt.toISOString(), i: last.id }),
+        ).toString('base64')
+      : null;
+
+  const users: UserPickerEntry[] = page.map((u) => ({
+    id: u.id,
+    name: u.name,
+    username: u.username,
+    avatarUrl: u.avatarUrl,
+  }));
+
+  return { users, nextCursor };
+}

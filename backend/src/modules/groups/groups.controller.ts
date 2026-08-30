@@ -1,20 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import { AppError, ErrorCode } from '../../lib/AppError.js';
 import {
-  acceptInvite as acceptInviteService,
-  createGroup as createGroupService,
   getGroup as getGroupService,
   leaveGroup as leaveGroupService,
   listMyGroups as listMyGroupsService,
-  listPendingInvites as listPendingInvitesService,
-  rejectInvite as rejectInviteService,
-  sendInvites as sendInvitesService,
 } from './groups.service.js';
-import {
-  createGroupSchema,
-  listMyGroupsQuery,
-  sendInvitesSchema,
-} from './groups.validation.js';
+import { listMyGroupsQuery } from './groups.validation.js';
 
 /**
  * Thin controllers. Per CLAUDE.md, business logic lives in the service
@@ -24,6 +15,11 @@ import {
  * Validation throws ZodError, which the central error middleware maps to
  * the standard envelope. Auth errors come from the requireAuth middleware
  * mounted at the router level.
+ *
+ * Groups are no longer created or invited to explicitly. A group IS its
+ * member set: the only entrypoint that produces groups is
+ * findOrCreateGroupByMembers inside the posts module. The HTTP surface
+ * here is therefore read + leave only.
  */
 
 function requireUser(req: Request): { id: string } {
@@ -32,27 +28,6 @@ function requireUser(req: Request): { id: string } {
     throw new AppError(401, ErrorCode.TOKEN_INVALID, 'Authentication required');
   }
   return { id: req.user.id };
-}
-
-/**
- * POST /groups
- *
- * Creates a new group with the caller as creator + sole initial member.
- * Optional `phoneNumbers` are turned into pending GroupInvite rows.
- */
-export async function postGroup(req: Request, res: Response, next: NextFunction) {
-  try {
-    const user = requireUser(req);
-    const body = createGroupSchema.parse(req.body);
-    const group = await createGroupService({
-      creatorId: user.id,
-      name: body.name,
-      phoneNumbers: body.phoneNumbers,
-    });
-    res.status(201).json({ success: true, data: group });
-  } catch (err) {
-    next(err);
-  }
 }
 
 /**
@@ -99,123 +74,9 @@ export async function getGroupById(req: Request, res: Response, next: NextFuncti
 }
 
 /**
- * GET /groups/:id/posts
- *
- * Placeholder for Phase 3a. Returns an empty array so the Home screen
- * can wire to a real URL today; the actual feed lands with the posts
- * migration.
- */
-export async function getGroupPosts(_req: Request, res: Response) {
-  res.status(200).json({ success: true, data: [] });
-}
-
-/**
- * POST /groups/:id/invites
- *
- * Send invites to one or more phone numbers. The caller must already be
- * a member of the group. Returns the count actually created (existing
- * members / pending invites are skipped silently).
- */
-export async function postGroupInvites(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  try {
-    const user = requireUser(req);
-    const groupId = req.params.id;
-    if (!groupId) {
-      throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Missing group id');
-    }
-    const body = sendInvitesSchema.parse(req.body);
-    const result = await sendInvitesService({
-      inviterId: user.id,
-      groupId,
-      phoneNumbers: body.phoneNumbers,
-    });
-    res.status(200).json({ success: true, data: result });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * GET /groups/invites/pending
- *
- * Lists invites sent TO the caller that are still pending.
- */
-export async function getPendingInvites(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  try {
-    const user = requireUser(req);
-    const result = await listPendingInvitesService(user.id);
-    res.status(200).json({ success: true, data: result });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * POST /invites/:id/accept
- *
- * Accepts an invite addressed to the caller. Creates a GroupMember row
- * and flips the invite to accepted, all in one transaction.
- */
-export async function postAcceptInvite(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  try {
-    const user = requireUser(req);
-    const inviteId = req.params.id;
-    if (!inviteId) {
-      throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Missing invite id');
-    }
-    const invite = await acceptInviteService({
-      inviteId,
-      userId: user.id,
-    });
-    res.status(200).json({ success: true, data: invite });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * POST /invites/:id/reject
- *
- * Rejects an invite addressed to the caller. No membership change.
- */
-export async function postRejectInvite(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  try {
-    const user = requireUser(req);
-    const inviteId = req.params.id;
-    if (!inviteId) {
-      throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Missing invite id');
-    }
-    const invite = await rejectInviteService({
-      inviteId,
-      userId: user.id,
-    });
-    res.status(200).json({ success: true, data: invite });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
  * DELETE /groups/:id/members/me
  *
- * Leave a group. Creator cannot leave — they must delete the group
- * (not a v1 endpoint).
+ * Leave a group. Every member can leave freely — there is no creator.
  */
 export async function deleteMyMembership(
   req: Request,

@@ -17,6 +17,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors } from '../../../src/theme';
 import { Text, Pill } from '../../../src/components/ui';
+import { useRefreshOnFocus } from '../../../src/hooks/useRefreshOnFocus';
 import {
   createComment as createCommentApi,
   getPost,
@@ -86,6 +87,12 @@ export default function HiddenDiscussionScreen() {
     // throw — surfaced via `error` for the loader to handle gracefully.
     retry: false,
   });
+
+  // Refresh when the user comes back to this post from another screen
+  // (e.g. opened notifications, switched to home and back). Reaction /
+  // response counts may have changed in the background.
+  useRefreshOnFocus(['post', postId]);
+  useRefreshOnFocus(['post', postId, 'responses']);
 
   const [draft, setDraft] = useState('');
   const [now, setNow] = useState<number>(() => Date.now());
