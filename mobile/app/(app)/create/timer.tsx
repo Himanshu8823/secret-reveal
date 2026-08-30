@@ -74,7 +74,7 @@ export default function CreateTimerScreen() {
   };
 
   const onBack = () => router.back();
-  const onClose = () => router.dismissTo('/(app)/home');
+  const onClose = () => router.replace('/(app)');
 
   return (
     <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>

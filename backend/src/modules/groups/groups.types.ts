@@ -58,9 +58,35 @@ export type LeaveGroupInput = {
 export type FindOrCreateGroupByMembersInput = {
   creatorId: string;
   memberIds: string[];
+  customName?: string;
 };
 
 export type FindOrCreateGroupByMembersResult = {
   group: GroupSummary;
   created: boolean;
+};
+
+export type InviteSummary = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  inviterId: string;
+  inviterName: string | null;
+  inviteeId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: string;
+};
+
+export type ListInvitesResult = {
+  invites: InviteSummary[];
+};
+
+export type SendInvitesInput = {
+  groupId: string;
+  inviterId: string;
+  phoneNumbers: string[];
+};
+
+export type SendInvitesResult = {
+  created: number;
 };

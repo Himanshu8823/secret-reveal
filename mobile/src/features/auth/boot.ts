@@ -73,30 +73,34 @@ export async function bootstrapAuth(): Promise<AuthBootState> {
 }
 
 function isAuthError(e: unknown): boolean {
-  // Server responded with 401/403, or local validation rejected.
-  // Treat axios errors with a response status in 4xx (except 408/429) as auth errors.
+  // Only 401/403 auth failures should wipe the persisted token.
+  // 400 validation, 404, 422 etc must NOT clear — they are transient
+  // and should go to `offline` so the next boot can retry with the same token.
+  // Kill → login bug was because any 4xx (e.g. 404 when backend was down)
+  // was treated as auth error and wiped the token.
   if (typeof e !== 'object' || e === null) return false;
   const err = e as {
     code?: string;
-    response?: { status?: number };
+    response?: { status?: number; data?: { error?: { code?: string } } };
     status?: number;
   };
   const status = err.response?.status ?? err.status;
+  const errorCode = err.response?.data?.error?.code ?? err.code;
+
+  // Explicit token codes — always wipe
   if (
-    typeof status === 'number' &&
-    status >= 400 &&
-    status < 500 &&
-    status !== 408 &&
-    status !== 429
-  ) {
-    return true;
-  }
-  if (
+    errorCode === 'TOKEN_INVALID' ||
+    errorCode === 'TOKEN_EXPIRED' ||
+    errorCode === 'UNAUTHENTICATED' ||
     err.code === 'TOKEN_INVALID' ||
     err.code === 'TOKEN_EXPIRED' ||
     err.code === 'UNAUTHENTICATED'
   ) {
     return true;
   }
+
+  // HTTP 401 only — not 404/400/422
+  if (status === 401) return true;
+
   return false;
 }

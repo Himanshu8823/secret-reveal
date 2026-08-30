@@ -66,3 +66,25 @@ export async function updateProfile(
     apiClient.patch<ApiEnvelope<UserProfile>>('/users/me', payload),
   );
 }
+
+export type UserPickerEntry = {
+  id: string;
+  name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+};
+
+export type ListUsersResponse = {
+  users: UserPickerEntry[];
+  nextCursor: string | null;
+};
+
+export async function listUsers(params?: {
+  cursor?: string;
+  limit?: number;
+  search?: string;
+}): Promise<ListUsersResponse> {
+  return unwrap<ListUsersResponse>(
+    apiClient.get<ApiEnvelope<ListUsersResponse>>('/users', { params }),
+  );
+}

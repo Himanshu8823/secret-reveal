@@ -137,6 +137,7 @@ export type CreatePostInput = {
   /** UUIDs of Media rows already uploaded in Phase 3b. */
   mediaIds?: string[];
   timerMinutes: number;
+  groupName?: string;
 };
 
 export type CreatedPost = {

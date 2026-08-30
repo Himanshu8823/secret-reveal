@@ -47,14 +47,25 @@ async function tryRefresh(): Promise<string | null> {
         useAuthStore.setState({ accessToken });
       }
       return accessToken;
-    } catch {
-      await clearRefreshToken();
-      const signOut = useAuthStore.getState().signOut;
-      if (signOut) {
-        signOut();
-      } else {
-        // Fallback if signOut isn't added yet
-        useAuthStore.setState({ accessToken: null });
+    } catch (e) {
+      // Only wipe on auth errors (401 / TOKEN_INVALID). Network / 5xx
+      // should preserve the token so next cold-start can retry.
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      const code = (e as { code?: string })?.code;
+      const isAuth =
+        status === 401 ||
+        code === 'TOKEN_INVALID' ||
+        code === 'TOKEN_EXPIRED' ||
+        code === 'UNAUTHENTICATED';
+      if (isAuth) {
+        await clearRefreshToken();
+        const signOut = useAuthStore.getState().signOut;
+        if (signOut) {
+          signOut();
+        } else {
+          // Fallback if signOut isn't added yet
+          useAuthStore.setState({ accessToken: null });
+        }
       }
       return null;
     } finally {

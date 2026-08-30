@@ -46,6 +46,10 @@ export default function GroupDetailScreen() {
     mutationFn: () => leaveGroup(groupId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['groups', 'mine'] });
+      queryClient.invalidateQueries({ queryKey: ['group', groupId] });
+      queryClient.invalidateQueries({ queryKey: ['group', groupId, 'posts'] });
+      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+      queryClient.invalidateQueries({ queryKey: ['users', 'me', 'stats'] });
       router.back();
     },
     onError: (e) => {
@@ -81,7 +85,8 @@ export default function GroupDetailScreen() {
 
   const group = groupQuery.data;
   const posts = postsQuery.data?.posts ?? [];
-  const isInitialLoad = groupQuery.isLoading && !groupQuery.data;
+  const isInitialLoad =
+    (groupQuery.isLoading && !groupQuery.data) || (postsQuery.isLoading && !postsQuery.data);
   // The detail payload doesn't include the caller's id directly, so we
   // can't reliably tell if the viewer is the creator. The Leave button
   // is always shown; the backend rejects creator-leave with a clear 409

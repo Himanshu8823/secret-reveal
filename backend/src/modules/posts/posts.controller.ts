@@ -46,6 +46,7 @@ export async function postCreate(req: Request, res: Response, next: NextFunction
       caption: body.caption,
       mediaIds: body.mediaIds,
       timerMinutes: body.timerMinutes,
+      groupName: body.groupName,
     });
     res.status(201).json({ success: true, data: result });
   } catch (err) {

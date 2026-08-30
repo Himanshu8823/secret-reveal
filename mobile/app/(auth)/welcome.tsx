@@ -3,6 +3,8 @@ import {
   View,
   KeyboardAvoidingView,
   Platform,
+  TextInput,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -10,9 +12,11 @@ import { Button, Input, Text, useDialog } from '../../src/components/ui';
 import { updateProfile } from '../../src/api/users.api';
 import { useAuthStore } from '../../src/store/authStore';
 import { setStoredUser } from '../../src/utils/secureStorage';
+import { colors, spacing } from '../../src/theme';
 
 const NAME_MAX = 60;
 const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
+const BIO_MAX = 160;
 
 /**
  * First-run welcome screen. Reached after verify-otp only when the user
@@ -24,6 +28,7 @@ const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
 export default function WelcomeScreen() {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
+  const [bio, setBio] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const dialog = useDialog();
 
@@ -58,11 +63,21 @@ export default function WelcomeScreen() {
       });
       return;
     }
+    if (bio.length > BIO_MAX) {
+      dialog.show({
+        variant: 'warning',
+        title: 'Bio is too long',
+        message: `Bio must be at most ${BIO_MAX} characters.`,
+        actions: [{ label: 'OK' }],
+      });
+      return;
+    }
     setSubmitting(true);
     try {
       const updated = await updateProfile({
         name: trimmedName,
         username: trimmedUsername,
+        bio: bio.length > 0 ? bio : undefined,
       });
       // Mirror the server's user shape back into the session so subsequent
       // screens (and the persisted blob used by boot.ts) see the values.
@@ -108,7 +123,12 @@ export default function WelcomeScreen() {
         className="flex-1"
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View className="flex-1 p-6 pt-12">
+        <ScrollView
+          className="flex-1"
+          contentContainerClassName="p-6 pt-12 pb-6"
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <View className="pt-6 pb-2">
             <Text variant="h1">Welcome to NEXORA</Text>
             <Text variant="body" tone="secondary" className="mt-2">
@@ -116,9 +136,9 @@ export default function WelcomeScreen() {
             </Text>
           </View>
 
-          <View className="flex-1 justify-center">
+          <View className="mt-6">
             <Input
-              label="Name"
+              label="Name *"
               placeholder="Your name"
               maxLength={NAME_MAX}
               autoFocus
@@ -130,7 +150,7 @@ export default function WelcomeScreen() {
             />
 
             <Input
-              label="Username"
+              label="Username *"
               placeholder="username"
               maxLength={20}
               value={username}
@@ -138,8 +158,7 @@ export default function WelcomeScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               helperText="3-20 lowercase letters, digits, or underscores"
-              returnKeyType="done"
-              onSubmitEditing={onContinue}
+              returnKeyType="next"
               containerClassName="mb-5"
               leftSlot={
                 <Text variant="body" tone="secondary">
@@ -147,6 +166,44 @@ export default function WelcomeScreen() {
                 </Text>
               }
             />
+
+            <View className="mb-5">
+              <Text variant="bodyStrong" tone="primary" className="mb-3">
+                About Me
+              </Text>
+              <View
+                className="border border-border rounded-md bg-surface"
+                style={{
+                  borderRadius: 12,
+                  paddingHorizontal: spacing[3],
+                  paddingTop: spacing[2],
+                  minHeight: 100,
+                }}
+              >
+                <TextInput
+                  value={bio}
+                  onChangeText={(t) => setBio(t.slice(0, BIO_MAX))}
+                  placeholder="Tell people a bit about yourself (optional)"
+                  placeholderTextColor={colors.text.tertiary}
+                  multiline
+                  textAlignVertical="top"
+                  style={{
+                    fontSize: 15,
+                    lineHeight: 22,
+                    minHeight: 60,
+                    color: colors.text.primary,
+                  }}
+                />
+              </View>
+              <View className="flex-row justify-between mt-1">
+                <Text variant="caption" tone="secondary">
+                  Up to {BIO_MAX} characters
+                </Text>
+                <Text variant="caption" tone="secondary">
+                  {bio.length}/{BIO_MAX}
+                </Text>
+              </View>
+            </View>
 
             <Button
               label="Continue"
@@ -157,7 +214,7 @@ export default function WelcomeScreen() {
               onPress={onContinue}
             />
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

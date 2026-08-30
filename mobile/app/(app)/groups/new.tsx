@@ -141,6 +141,7 @@ export default function CreateGroupScreen() {
       // new pending invites for the phone numbers we sent to.
       queryClient.invalidateQueries({ queryKey: ['groups', 'mine'] });
       queryClient.invalidateQueries({ queryKey: ['invites', 'pending'] });
+      queryClient.invalidateQueries({ queryKey: ['users', 'me', 'stats'] });
       // Land on the new group's detail screen.
       router.replace({ pathname: '/(app)/group/[id]', params: { id: group.id } });
     } catch (e) {

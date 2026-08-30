@@ -1,11 +1,20 @@
 import type { Request, Response, NextFunction } from 'express';
 import { AppError, ErrorCode } from '../../lib/AppError.js';
 import {
+  acceptInvite as acceptInviteService,
+  createGroup as createGroupService,
   getGroup as getGroupService,
   leaveGroup as leaveGroupService,
   listMyGroups as listMyGroupsService,
+  listPendingInvites as listPendingInvitesService,
+  rejectInvite as rejectInviteService,
+  sendInvites as sendInvitesService,
 } from './groups.service.js';
-import { listMyGroupsQuery } from './groups.validation.js';
+import {
+  createGroupSchema,
+  listMyGroupsQuery,
+  sendInvitesSchema,
+} from './groups.validation.js';
 
 /**
  * Thin controllers. Per CLAUDE.md, business logic lives in the service
@@ -91,6 +100,72 @@ export async function deleteMyMembership(
     }
     await leaveGroupService({ userId: user.id, groupId });
     res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function createGroupHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const body = createGroupSchema.parse(req.body);
+    const group = await createGroupService({
+      creatorId: user.id,
+      name: body.name,
+      phoneNumbers: body.phoneNumbers,
+    });
+    res.status(201).json({ success: true, data: group });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function sendInvitesHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const groupId = req.params.id;
+    if (!groupId) throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Missing group id');
+    const body = sendInvitesSchema.parse(req.body);
+    const result = await sendInvitesService({
+      groupId,
+      inviterId: user.id,
+      phoneNumbers: body.phoneNumbers,
+    });
+    res.status(201).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listPendingInvitesHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const result = await listPendingInvitesService(user.id);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function acceptInviteHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const inviteId = req.params.inviteId;
+    if (!inviteId) throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Missing invite id');
+    const result = await acceptInviteService(inviteId, user.id);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function rejectInviteHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const inviteId = req.params.inviteId;
+    if (!inviteId) throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Missing invite id');
+    const result = await rejectInviteService(inviteId, user.id);
+    res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

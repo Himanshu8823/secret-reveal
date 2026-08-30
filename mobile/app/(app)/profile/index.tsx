@@ -11,6 +11,7 @@ import { useAuth } from '../../../src/features/auth/hooks/useAuth';
 import { useAvatarUpload } from '../../../src/features/profile/useAvatarUpload';
 import { useRefreshOnFocus } from '../../../src/hooks/useRefreshOnFocus';
 import { clearRefreshToken } from '../../../src/utils/secureStorage';
+import { useAuthStore } from '../../../src/store/authStore';
 import { colors } from '../../../src/theme';
 
 /**
@@ -51,7 +52,12 @@ export default function ProfileScreen() {
   useRefreshOnFocus(['users', 'me']);
   useRefreshOnFocus(['users', 'me', 'stats']);
 
-  const user = profileQuery.data;
+  // Edit screen hydrates from authStore instantly (sessionUser), while
+  // profile was waiting only for getMe() → looked empty until network
+  // returned. Use store as fallback so original cached name shows
+  // immediately, then server data wins when it arrives.
+  const storeUser = useAuthStore((s) => s.user);
+  const user = profileQuery.data ?? storeUser ?? undefined;
 
   const onChangeAvatar = () => {
     pickAndUpload({
@@ -89,13 +95,11 @@ export default function ProfileScreen() {
             onCameraPress={onChangeAvatar}
           />
 
-          <Text
-            variant="h2"
-            tone="primary"
-            className="mt-4 text-center"
-          >
-            {user?.name?.trim() ? user.name : 'NEXORA user'}
-          </Text>
+          {user?.name?.trim() ? (
+            <Text variant="h2" tone="primary" className="mt-4 text-center">
+              {user.name}
+            </Text>
+          ) : null}
 
           {user?.username ? (
             <Text
@@ -164,7 +168,7 @@ export default function ProfileScreen() {
             />
             <Text variant="caption" tone="tertiary" className="ml-1.5">
               Joined{' '}
-              {new Date(user?.createdAt ?? Date.now()).toLocaleString('en-US', {
+              {new Date((user as unknown as { createdAt?: string })?.createdAt ?? Date.now()).toLocaleString('en-US', {
                 month: 'long',
                 year: 'numeric',
               })}

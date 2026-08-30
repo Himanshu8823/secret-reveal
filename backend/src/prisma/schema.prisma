@@ -23,6 +23,8 @@ model User {
 
   refreshTokens  RefreshToken[]
   memberships    GroupMember[]
+  sentInvites     GroupInvite[] @relation("InviteInviter")
+  receivedInvites GroupInvite[] @relation("InviteInvitee")
   authoredPosts  Post[]          @relation("author")
   responses      Response[]
   reactions      Reaction[]
@@ -65,6 +67,7 @@ model Group {
   updatedAt       DateTime @updatedAt          @db.Timestamptz(6)
 
   members GroupMember[]
+  invites GroupInvite[]
   posts   Post[]
 
   @@index([lastActivityAt(sort: Desc)])
@@ -86,6 +89,25 @@ model GroupMember {
   @@id([groupId, userId])
   @@index([userId])
   @@map("group_members")
+}
+
+model GroupInvite {
+  id        String   @id @default(uuid()) @db.Uuid
+  groupId   String   @db.Uuid
+  inviterId String   @db.Uuid
+  inviteeId String   @db.Uuid
+  status    String   @default("pending") @db.VarChar(20) // pending | accepted | rejected
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviter User  @relation("InviteInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee User  @relation("InviteInvitee", fields: [inviteeId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, inviteeId])
+  @@index([inviteeId, status])
+  @@index([groupId])
+  @@map("group_invites")
 }
 
 model Media {

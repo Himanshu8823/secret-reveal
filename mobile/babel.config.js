@@ -19,5 +19,6 @@ module.exports = function (api) {
     // `Event.BUBBLING_PHASE`) writable from app code, since the babel
     // loose output is fine for everything else. That is done in
     // `polyfills.js` after the RN core bundle loads.
+    plugins: ['react-native-reanimated/plugin'],
   };
 };

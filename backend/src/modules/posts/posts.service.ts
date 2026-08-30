@@ -77,12 +77,13 @@ export async function createPost(input: CreatePostInput): Promise<CreatePostResu
   // Resolve the target group up front. For memberIds we go through the
   // find-or-create helper, which both locates an existing group for the
   // same member set and (when missing) inserts the membership rows in
-  // its own transaction.
+  // its own transaction. customName is the compulsory Group name from the UI.
   let resolvedGroupId: string;
   if (memberIds && memberIds.length > 0) {
     const { group } = await findOrCreateGroupByMembers({
       creatorId: authorId,
       memberIds,
+      customName: input.groupName,
     });
     resolvedGroupId = group.id;
   } else {

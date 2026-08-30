@@ -8,6 +8,7 @@ import type {
   GroupMemberSummary,
   GroupSummary,
   GroupWithMembers,
+  InviteSummary,
   LeaveGroupInput,
   ListMyGroupsInput,
   ListMyGroupsResult,
@@ -216,7 +217,7 @@ export function buildMemberSignature(creatorId: string, memberIds: string[]): st
 export async function findOrCreateGroupByMembers(
   input: FindOrCreateGroupByMembersInput,
 ): Promise<FindOrCreateGroupByMembersResult> {
-  const { creatorId, memberIds } = input;
+  const { creatorId, memberIds, customName } = input;
 
   // Build the unique signature for this member set.
   const memberSignature = buildMemberSignature(creatorId, memberIds);
@@ -250,9 +251,9 @@ export async function findOrCreateGroupByMembers(
     };
   }
 
-  // Slow path — derive a display name for the new group. We only need the
-  // members listed in `memberIds` plus the creator; everyone gets a row in
-  // the same create call.
+  // Slow path — derive a display name for the new group. If caller
+  // provided a customName (from the compulsory Group name field), use it.
+  // Otherwise fall back to member names so legacy NOT NULL constraint stays satisfied.
   const allIds = Array.from(new Set<string>([creatorId, ...memberIds]));
   const memberRows = await prisma.user.findMany({
     where: { id: { in: allIds } },
@@ -265,7 +266,7 @@ export async function findOrCreateGroupByMembers(
     .map((id: string) => nameById.get(id) ?? null)
     .filter((n: string | null): n is string => typeof n === 'string' && n.length > 0);
   const derivedName =
-    namesForLabel.length > 0 ? namesForLabel.join(', ') : 'Untitled';
+    customName?.trim().length ? customName.trim().slice(0, 60) : namesForLabel.length > 0 ? namesForLabel.join(', ') : 'Untitled';
 
   // Validate every invitee id resolves to a real user before we attempt
   // the create. If any are missing, surface a per-id NOT_FOUND so the
@@ -301,10 +302,7 @@ export async function findOrCreateGroupByMembers(
           name: derivedName,
           memberSignature,
           members: {
-            create: [
-              { userId: creatorId },
-              ...cleanedMemberIds.map((userId) => ({ userId })),
-            ],
+            create: [{ userId: creatorId }],
           },
         },
         select: {
@@ -315,6 +313,29 @@ export async function findOrCreateGroupByMembers(
           _count: { select: { members: true } },
         },
       });
+
+      // Pending invite flow — invitees are NOT added as members yet.
+      // They appear in Groups tab as pending and become members only after Accept.
+      for (const inviteeId of cleanedMemberIds) {
+        // Skip if already a member (edge) or already pending
+        const existingInvite = await tx.groupInvite.findUnique({
+          where: { groupId_inviteeId: { groupId: created.id, inviteeId } },
+        });
+        if (existingInvite) continue;
+        const alreadyMember = await tx.groupMember.findUnique({
+          where: { groupId_userId: { groupId: created.id, userId: inviteeId } },
+        });
+        if (alreadyMember) continue;
+        await tx.groupInvite.create({
+          data: {
+            groupId: created.id,
+            inviterId: creatorId,
+            inviteeId,
+            status: 'pending',
+          },
+        });
+      }
+
       return created;
     });
   } catch (err) {
@@ -366,5 +387,189 @@ export async function findOrCreateGroupByMembers(
       latestPost: null,
     },
     created: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Invite flow — pending confirmation on Groups tab
+// ---------------------------------------------------------------------------
+
+export async function createGroup(input: {
+  creatorId: string;
+  name: string;
+  phoneNumbers: string[];
+}): Promise<GroupWithMembers> {
+  const { creatorId, name, phoneNumbers } = input;
+  const group = await prisma.group.create({
+    data: {
+      name: name.trim() || 'Untitled',
+      members: { create: { userId: creatorId } },
+    },
+    include: {
+      members: {
+        include: { user: { select: { id: true, name: true, phone: true } } },
+      },
+    },
+  });
+
+  // Create pending invites for phone numbers (if any)
+  if (phoneNumbers.length > 0) {
+    const users = await prisma.user.findMany({
+      where: { phone: { in: phoneNumbers } },
+      select: { id: true, phone: true },
+    });
+    const toInvite = users.filter((u) => u.id !== creatorId);
+    for (const u of toInvite) {
+      const alreadyMember = await prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId: group.id, userId: u.id } },
+      });
+      if (alreadyMember) continue;
+      const existingInvite = await prisma.groupInvite.findUnique({
+        where: { groupId_inviteeId: { groupId: group.id, inviteeId: u.id } },
+      });
+      if (existingInvite) continue;
+      await prisma.groupInvite.create({
+        data: {
+          groupId: group.id,
+          inviterId: creatorId,
+          inviteeId: u.id,
+          status: 'pending',
+        },
+      });
+    }
+  }
+
+  return {
+    id: group.id,
+    name: group.name,
+    lastActivityAt: group.lastActivityAt,
+    createdAt: group.createdAt,
+    updatedAt: group.updatedAt,
+    members: group.members.map((m) => ({
+      userId: m.userId,
+      name: m.user.name,
+      phone: m.user.phone,
+      joinedAt: m.joinedAt,
+    })),
+  };
+}
+
+export async function sendInvites(input: {
+  groupId: string;
+  inviterId: string;
+  phoneNumbers: string[];
+}): Promise<{ created: number }> {
+  const { groupId, inviterId, phoneNumbers } = input;
+
+  const group = await prisma.group.findUnique({ where: { id: groupId }, select: { id: true } });
+  if (!group) throw new AppError(404, ErrorCode.NOT_FOUND, 'Group not found');
+
+  const isMember = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId, userId: inviterId } },
+  });
+  if (!isMember) throw new AppError(403, ErrorCode.FORBIDDEN, 'Not a member of this group');
+
+  const users = await prisma.user.findMany({
+    where: { phone: { in: phoneNumbers } },
+    select: { id: true },
+  });
+
+  let created = 0;
+  for (const u of users) {
+    if (u.id === inviterId) continue;
+    const alreadyMember = await prisma.groupMember.findUnique({
+      where: { groupId_userId: { groupId, userId: u.id } },
+    });
+    if (alreadyMember) continue;
+    const existing = await prisma.groupInvite.findUnique({
+      where: { groupId_inviteeId: { groupId, inviteeId: u.id } },
+    });
+    if (existing) continue;
+    await prisma.groupInvite.create({
+      data: { groupId, inviterId, inviteeId: u.id, status: 'pending' },
+    });
+    created++;
+  }
+  return { created };
+}
+
+export async function listPendingInvites(userId: string): Promise<{ invites: InviteSummary[] }> {
+  const rows = await prisma.groupInvite.findMany({
+    where: { inviteeId: userId, status: 'pending' },
+    include: {
+      group: { select: { name: true } },
+      inviter: { select: { name: true } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const invites: InviteSummary[] = rows.map((r) => ({
+    id: r.id,
+    groupId: r.groupId,
+    groupName: r.group.name,
+    inviterId: r.inviterId,
+    inviterName: r.inviter.name,
+    inviteeId: r.inviteeId,
+    status: r.status as 'pending' | 'accepted' | 'rejected',
+    createdAt: r.createdAt.toISOString(),
+  }));
+
+  return { invites };
+}
+
+export async function acceptInvite(inviteId: string, userId: string): Promise<InviteSummary> {
+  const invite = await prisma.groupInvite.findUnique({
+    where: { id: inviteId },
+    include: { group: { select: { name: true } }, inviter: { select: { name: true } } },
+  });
+  if (!invite) throw new AppError(404, ErrorCode.NOT_FOUND, 'Invite not found');
+  if (invite.inviteeId !== userId) throw new AppError(403, ErrorCode.FORBIDDEN, 'Not your invite');
+  if (invite.status !== 'pending') throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Invite already handled');
+
+  await prisma.$transaction(async (tx) => {
+    await tx.groupMember.create({
+      data: { groupId: invite.groupId, userId },
+    });
+    await tx.groupInvite.update({
+      where: { id: inviteId },
+      data: { status: 'accepted' },
+    });
+  });
+
+  return {
+    id: invite.id,
+    groupId: invite.groupId,
+    groupName: invite.group.name,
+    inviterId: invite.inviterId,
+    inviterName: invite.inviter.name,
+    inviteeId: invite.inviteeId,
+    status: 'accepted',
+    createdAt: invite.createdAt.toISOString(),
+  };
+}
+
+export async function rejectInvite(inviteId: string, userId: string): Promise<InviteSummary> {
+  const invite = await prisma.groupInvite.findUnique({
+    where: { id: inviteId },
+    include: { group: { select: { name: true } }, inviter: { select: { name: true } } },
+  });
+  if (!invite) throw new AppError(404, ErrorCode.NOT_FOUND, 'Invite not found');
+  if (invite.inviteeId !== userId) throw new AppError(403, ErrorCode.FORBIDDEN, 'Not your invite');
+  if (invite.status !== 'pending') throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Invite already handled');
+
+  const updated = await prisma.groupInvite.update({
+    where: { id: inviteId },
+    data: { status: 'rejected' },
+  });
+
+  return {
+    id: invite.id,
+    groupId: invite.groupId,
+    groupName: invite.group.name,
+    inviterId: invite.inviterId,
+    inviterName: invite.inviter.name,
+    inviteeId: invite.inviteeId,
+    status: updated.status as 'pending' | 'accepted' | 'rejected',
+    createdAt: invite.createdAt.toISOString(),
   };
 }

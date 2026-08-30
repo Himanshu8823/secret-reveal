@@ -130,6 +130,8 @@ export function useAvatarUpload() {
         // Step 5 — invalidate the profile query so any other screen
         // (header avatar in feed cards, etc.) sees the new value.
         queryClient.invalidateQueries({ queryKey: ['users', 'me'] });
+        queryClient.invalidateQueries({ queryKey: ['users', 'me', 'stats'] });
+        queryClient.invalidateQueries({ queryKey: ['users', 'picker'] });
 
         return { localUri: asset.uri, publicUrl };
       } catch (err) {

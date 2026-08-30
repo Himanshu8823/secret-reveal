@@ -45,6 +45,7 @@ export const createPostSchema = z
       .int('timerMinutes must be an integer')
       .min(5, 'timerMinutes must be at least 5')
       .max(1440, 'timerMinutes must be at most 1440 (24 hours)'),
+    groupName: z.string().trim().min(1).max(60).optional(),
   })
   .refine(
     (b) => Boolean(b.groupId) !== Boolean(b.memberIds && b.memberIds.length > 0),

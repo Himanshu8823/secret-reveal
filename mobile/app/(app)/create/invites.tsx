@@ -6,30 +6,17 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Text, useDialog } from '../../../src/components/ui';
 import { colors } from '../../../src/theme';
 import { useComposerStore } from '../../../src/store/composerStore';
 import { createPost } from '../../../src/api/posts.api';
-
-// ---------------------------------------------------------------------------
-// Fixture invitees — contact sync lands later. Five fake users with stable
-// ids so the create-group request can carry real-shape memberIds.
-// ---------------------------------------------------------------------------
-
-type Fixture = { id: string; name: string };
-
-const FIXTURE_INVITEES: Fixture[] = [
-  { id: 'u_fx_anya', name: 'Anya Sharma' },
-  { id: 'u_fx_dev', name: 'Dev Patel' },
-  { id: 'u_fx_meera', name: 'Meera Iyer' },
-  { id: 'u_fx_rohan', name: 'Rohan Mehta' },
-  { id: 'u_fx_zara', name: 'Zara Khan' },
-];
+import { listUsers } from '../../../src/api/users.api';
 
 const GROUP_NAME_MAX = 60;
 
@@ -48,22 +35,37 @@ export default function CreateInvitesScreen() {
   const [submitting, setSubmitting] = useState(false);
   const dialog = useDialog();
 
-  // Group name is OPTIONAL now: the backend resolves / materialises the
-  // Group from the member-set signature, so only the invitee ids matter
-  // on the wire. The field is still rendered for users who want to
-  // label a recurring group (see flagged UX note in the PR description).
+  const usersQuery = useQuery({
+    queryKey: ['users', 'picker'],
+    queryFn: () => listUsers({ limit: 50 }),
+  });
+  const pickerUsers = usersQuery.data?.users ?? [];
+
   const trimmedGroupName = localGroupName.trim();
+  const [groupNameError, setGroupNameError] = useState<string | null>(null);
   const canPublish =
     !submitting &&
+    trimmedGroupName.length >= 1 &&
     trimmedGroupName.length <= GROUP_NAME_MAX &&
     invitees.length >= 1 &&
     timerMinutes !== null;
 
   const onBack = () => router.back();
-  const onClose = () => router.dismissTo('/(app)/home');
+  const onClose = () => router.replace('/(app)');
 
   const onPublish = async () => {
-    if (!canPublish) return;
+    if (!canPublish) {
+      if (trimmedGroupName.length === 0) {
+        setGroupNameError('Group name is required');
+        dialog.show({
+          variant: 'warning',
+          title: 'Group name required',
+          message: 'Please enter a group name to publish.',
+          actions: [{ label: 'OK' }],
+        });
+      }
+      return;
+    }
     if (timerMinutes === null) {
       // Defensive — the timer screen enforces this, but never trust state.
       dialog.show({
@@ -87,14 +89,17 @@ export default function CreateInvitesScreen() {
         caption,
         mediaIds: [],
         timerMinutes,
+        groupName: trimmedGroupName,
       });
-      // Invalidate groups + posts caches so Home refetches when we land
-      // there and the new post appears in the "Recent discussions"
-      // feed.
+      // Invalidate groups + posts + stats so Home, Group detail and
+      // Profile stats refresh without manual pull.
       queryClient.invalidateQueries({ queryKey: ['groups', 'mine'] });
       queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+      queryClient.invalidateQueries({ queryKey: ['group'] });
+      queryClient.invalidateQueries({ queryKey: ['posts'] });
+      queryClient.invalidateQueries({ queryKey: ['users', 'me', 'stats'] });
       reset();
-      router.dismissTo('/(app)/home');
+      router.replace('/(app)');
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Could not publish the post.';
       dialog.show({
@@ -146,16 +151,19 @@ export default function CreateInvitesScreen() {
         >
           <Text variant="h2" className="mb-6">Group Invitation</Text>
 
-          {/* Group name */}
+          {/* Group name — compulsory */}
           <View className="mb-6">
-            <Text variant="bodyStrong" className="mb-2.5">Group name</Text>
-            <View className="border border-border rounded-md bg-surface py-3 px-4">
+            <Text variant="bodyStrong" className="mb-2.5">Group name *</Text>
+            <View
+              className={`border rounded-md bg-surface py-3 px-4 ${groupNameError ? 'border-danger' : 'border-border'}`}
+            >
               <TextInput
-                placeholder="Group name"
+                placeholder="Group name *"
                 placeholderTextColor={colors.text.secondary}
                 value={localGroupName}
                 onChangeText={(v) => {
                   setLocalGroupName(v);
+                  if (groupNameError) setGroupNameError(null);
                   // Persist into the store as the user types so the back-nav
                   // round-trip preserves the value.
                   setGroupName(v);
@@ -166,6 +174,15 @@ export default function CreateInvitesScreen() {
                 style={{ fontSize: 15, fontWeight: '500' }}
               />
             </View>
+            {groupNameError ? (
+              <Text variant="caption" tone="danger" className="mt-1.5">
+                {groupNameError}
+              </Text>
+            ) : (
+              <Text variant="caption" tone="secondary" className="mt-1.5">
+                Required — 1 to {GROUP_NAME_MAX} characters
+              </Text>
+            )}
           </View>
 
           {/* Selected chips */}
@@ -199,54 +216,96 @@ export default function CreateInvitesScreen() {
             </View>
           ) : null}
 
-          {/* Invite list */}
+          {/* Invite list — real users from DB */}
           <View className="mb-6">
             <Text variant="bodyStrong" className="mb-2.5">Invite people</Text>
-            <View className="rounded-lg bg-surface border border-border overflow-hidden">
-              {FIXTURE_INVITEES.map((person) => {
-                const isAdded = invitees.some((i) => i.id === person.id);
-                return (
-                  <View
-                    key={person.id}
-                    className="flex-row items-center py-3 px-3.5 border-b border-border"
-                    style={{ borderBottomWidth: 0.5 }}
-                  >
-                    <View className="w-9 h-9 rounded-full items-center justify-center mr-3 bg-primary-subtle">
-                      <Text variant="bodyStrong" tone="primary">
-                        {person.name.slice(0, 1).toUpperCase()}
+            {usersQuery.isLoading ? (
+              <View className="py-8 items-center rounded-lg bg-surface border border-border">
+                <ActivityIndicator color={colors.brand.primary} />
+                <Text variant="caption" tone="secondary" className="mt-2">
+                  Loading users…
+                </Text>
+              </View>
+            ) : usersQuery.error ? (
+              <View className="py-6 items-center rounded-lg bg-surface border border-border px-4">
+                <Text variant="body" tone="secondary" className="text-center">
+                  Couldn't load users.
+                </Text>
+                <View className="mt-3">
+                  <Button
+                    label={usersQuery.isFetching ? 'Retrying…' : 'Refresh'}
+                    variant="secondary"
+                    size="md"
+                    loading={usersQuery.isFetching}
+                    onPress={() => usersQuery.refetch()}
+                    accessibilityLabel="Refresh users"
+                  />
+                </View>
+              </View>
+            ) : pickerUsers.length === 0 ? (
+              <View className="py-8 items-center rounded-lg bg-surface border border-border px-4">
+                <Text variant="bodyStrong" className="text-center">
+                  No users yet
+                </Text>
+                <Text variant="caption" tone="secondary" className="text-center mt-1">
+                  No one to invite right now.
+                </Text>
+                <View className="mt-4">
+                  <Button
+                    label={usersQuery.isFetching ? 'Refreshing…' : 'Refresh'}
+                    variant="secondary"
+                    size="md"
+                    loading={usersQuery.isFetching}
+                    onPress={() => usersQuery.refetch()}
+                    accessibilityLabel="Refresh users"
+                  />
+                </View>
+              </View>
+            ) : (
+              <View className="rounded-lg bg-surface border border-border overflow-hidden">
+                {pickerUsers.map((person) => {
+                  const displayName = person.name ?? person.username ?? 'Unknown';
+                  const isAdded = invitees.some((i) => i.id === person.id);
+                  return (
+                    <View
+                      key={person.id}
+                      className="flex-row items-center py-3 px-3.5 border-b border-border"
+                      style={{ borderBottomWidth: 0.5 }}
+                    >
+                      <View className="w-9 h-9 rounded-full items-center justify-center mr-3 bg-primary-subtle">
+                        <Text variant="bodyStrong" tone="primary">
+                          {displayName.slice(0, 1).toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text
+                        variant="body"
+                        bold
+                        numberOfLines={1}
+                        className="flex-1 mr-3"
+                      >
+                        {displayName}
                       </Text>
+                      <Pressable
+                        onPress={() => toggleInvitee(person.id, displayName)}
+                        accessibilityLabel={
+                          isAdded ? `Remove ${displayName}` : `Add ${displayName}`
+                        }
+                        className={[
+                          'px-3 py-2 rounded-sm border active:opacity-70',
+                          isAdded
+                            ? 'bg-primary-subtle border-primary'
+                            : 'bg-surface border-border',
+                        ].join(' ')}
+                      >
+                        <Text variant="caption" bold tone="primary">
+                          {isAdded ? 'Added' : 'Add'}
+                        </Text>
+                      </Pressable>
                     </View>
-                    <Text
-                      variant="body"
-                      bold
-                      numberOfLines={1}
-                      className="flex-1 mr-3"
-                    >
-                      {person.name}
-                    </Text>
-                    <Pressable
-                      onPress={() => toggleInvitee(person.id, person.name)}
-                      accessibilityLabel={
-                        isAdded ? `Remove ${person.name}` : `Add ${person.name}`
-                      }
-                      className={[
-                        'px-3 py-2 rounded-sm border active:opacity-70',
-                        isAdded
-                          ? 'bg-primary-subtle border-primary'
-                          : 'bg-surface border-border',
-                      ].join(' ')}
-                    >
-                      <Text variant="caption" bold tone="primary">
-                        {isAdded ? 'Added' : 'Add'}
-                      </Text>
-                    </Pressable>
-                  </View>
-                );
-              })}
-            </View>
-            <Text variant="caption" tone="secondary" className="mt-2.5">
-              Contact sync arrives in a later release. For now, pick from this list.
-            </Text>
+                  );
+                })}
+              </View>
+            )}
           </View>
         </ScrollView>
 

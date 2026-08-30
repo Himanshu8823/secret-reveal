@@ -98,6 +98,7 @@ export type CreatePostInput = {
   caption: string;
   mediaIds: string[];
   timerMinutes: number;
+  groupName?: string;
 };
 
 export type CreatePostResult = {

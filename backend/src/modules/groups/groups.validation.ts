@@ -29,3 +29,19 @@ export const listMyGroupsQuery = z.object({
 });
 
 export type ListMyGroupsQuery = z.infer<typeof listMyGroupsQuery>;
+
+export const sendInvitesSchema = z.object({
+  phoneNumbers: z
+    .array(z.string().min(5).max(20))
+    .min(1)
+    .max(10),
+});
+
+export type SendInvitesBody = z.infer<typeof sendInvitesSchema>;
+
+export const createGroupSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  phoneNumbers: z.array(z.string().min(5).max(20)).max(10).default([]),
+});
+
+export type CreateGroupBody = z.infer<typeof createGroupSchema>;

@@ -51,21 +51,20 @@ import {
 
 const AVATAR_SIZE = 36;
 
-// Hero palette — kept identical to the prior pass so designers don't
-// have to re-review spacing tokens.
-const HERO_TOP = '#0B1228';
-const HERO_MID = '#13193A';
-const HERO_BOTTOM = '#1A2151';
-const HERO_OVERLAY = 'rgba(255,255,255,0.06)';
-const HERO_OVERLAY_STRONG = 'rgba(255,255,255,0.16)';
-const HERO_ICON_MUTED = '#B6B9BF';
-const HERO_BORDER = 'rgba(255,255,255,0.12)';
-const HERO_ERROR = '#FCA5A5';
+// Light palette — matches app's white theme (surface bg/muted, brand subtle)
+const HERO_TOP = colors.surface.bg;
+const HERO_MID = colors.surface.muted;
+const HERO_BOTTOM = colors.surface.bg;
+const HERO_OVERLAY = colors.surface.muted;
+const HERO_OVERLAY_STRONG = colors.brand.primarySubtle;
+const HERO_ICON_MUTED = colors.text.tertiary;
+const HERO_BORDER = colors.border.DEFAULT;
+const HERO_ERROR = colors.semantic.danger;
 
 const REACTIONS: { type: ReactionType; icon: string; label: string }[] = [
   { type: 'like', icon: 'heart-outline', label: 'Like' },
   { type: 'love', icon: 'heart', label: 'Love' },
-  { type: 'laugh', icon: 'emoticon-happy-outline', label: 'Haha' },
+  { type: 'laugh', icon: 'happy-outline', label: 'Haha' },
 ];
 
 export default function HiddenDiscussionScreen() {
@@ -77,18 +76,29 @@ export default function HiddenDiscussionScreen() {
     queryKey: ['post', postId],
     queryFn: () => getPost(postId),
     enabled: Boolean(postId),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const responsesQuery = useQuery({
     queryKey: ['post', postId, 'responses'],
     queryFn: () => listResponses(postId),
     enabled: Boolean(postId),
-    // 403 during active phase (unless the viewer is the author) will
-    // throw — surfaced via `error` for the loader to handle gracefully.
+    // 403 during active phase will throw — surfaced via `error`.
+    // Keep previous data while refetching to avoid flicker between
+    // "No responses" and "Hidden" states.
     retry: false,
+    staleTime: 2 * 60_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
+    placeholderData: (prev) => prev,
   });
 
   // Refresh when the user comes back to this post from another screen
+  // — only for the post itself. Responses are refreshed on demand
+  // (pull or after submit) to avoid flicker from too-frequent fetches.
   // (e.g. opened notifications, switched to home and back). Reaction /
   // response counts may have changed in the background.
   useRefreshOnFocus(['post', postId]);
@@ -123,6 +133,9 @@ export default function HiddenDiscussionScreen() {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
       queryClient.invalidateQueries({ queryKey: ['post', postId, 'responses'] });
       queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+      if (post?.groupId) {
+        queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
+      }
     },
   });
 
@@ -130,6 +143,10 @@ export default function HiddenDiscussionScreen() {
     mutationFn: (type: ReactionType) => toggleReaction(postId, { type }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
+      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+      if (post?.groupId) {
+        queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
+      }
     },
   });
 
@@ -139,6 +156,9 @@ export default function HiddenDiscussionScreen() {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
       queryClient.invalidateQueries({ queryKey: ['post', postId, 'responses'] });
       queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+      if (post?.groupId) {
+        queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
+      }
     },
   });
 
@@ -146,6 +166,10 @@ export default function HiddenDiscussionScreen() {
     mutationFn: (body: string) => createCommentApi(postId, { body }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
+      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+      if (post?.groupId) {
+        queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
+      }
     },
   });
 
@@ -154,25 +178,10 @@ export default function HiddenDiscussionScreen() {
   const isInitialLoad = postQuery.isLoading && !postQuery.data;
 
   return (
-    <View className="flex-1">
-      {/* Fake gradient — three stacked views, no new deps. */}
-      <View
-        className="absolute left-0 right-0"
-        style={{ top: 0, height: '40%', backgroundColor: HERO_TOP }}
-        pointerEvents="none"
-      />
-      <View
-        className="absolute left-0 right-0"
-        style={{ top: '30%', height: '40%', backgroundColor: HERO_MID, opacity: 0.85 }}
-        pointerEvents="none"
-      />
-      <View
-        className="absolute left-0 right-0"
-        style={{ bottom: 0, height: '40%', backgroundColor: HERO_BOTTOM, opacity: 0.7 }}
-        pointerEvents="none"
-      />
+    <View className="flex-1 bg-surface">
+      <View className="absolute inset-0 bg-surface" pointerEvents="none" />
 
-      <SafeAreaView className="flex-1" edges={['top', 'bottom']}>
+      <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           className="flex-1"
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -189,7 +198,7 @@ export default function HiddenDiscussionScreen() {
                   className="self-start px-3 py-1.5 rounded-full"
                   style={{ backgroundColor: HERO_OVERLAY_STRONG }}
                 >
-                  <Text variant="caption" bold tone="onDark" numberOfLines={1}>
+                  <Text variant="caption" bold tone="primary" numberOfLines={1}>
                     {post?.status === 'revealed' ? 'Discussion revealed' : 'Hidden Discussion'}
                   </Text>
                 </View>
@@ -205,7 +214,7 @@ export default function HiddenDiscussionScreen() {
               >
                 <Text
                   variant="metaStrong"
-                  tone="onDark"
+                  tone="primary"
                   numberOfLines={1}
                   style={{
                     fontVariant: ['tabular-nums'],
@@ -219,11 +228,11 @@ export default function HiddenDiscussionScreen() {
 
             {isInitialLoad ? (
               <View className="py-12 items-center">
-                <ActivityIndicator color={colors.text.onDark} />
+                <ActivityIndicator color={colors.brand.primary} />
               </View>
             ) : postQuery.error ? (
               <View className="py-8 items-center">
-                <Text variant="body" tone="onDark" className="mb-3">
+                <Text variant="body" tone="primary" className="mb-3">
                   Couldn't load this discussion.
                 </Text>
                 <Pressable
@@ -231,7 +240,7 @@ export default function HiddenDiscussionScreen() {
                   className="px-4 py-2 rounded-md active:opacity-80"
                   style={{ backgroundColor: HERO_OVERLAY_STRONG }}
                 >
-                  <Text variant="bodyStrong" tone="onDark">
+                  <Text variant="bodyStrong" tone="primary">
                     Retry
                   </Text>
                 </Pressable>
@@ -247,7 +256,7 @@ export default function HiddenDiscussionScreen() {
                   className="mt-6 pt-4"
                   style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
                 >
-                  <Text variant="title" tone="onDark" className="mb-3">
+                  <Text variant="title" tone="primary" className="mb-3">
                     React
                   </Text>
                   <View className="flex-row items-center gap-3">
@@ -269,9 +278,9 @@ export default function HiddenDiscussionScreen() {
                           <Ionicons
                             name={r.icon as never}
                             size={16}
-                            color={colors.text.onDark}
+                            color={active ? colors.brand.onPrimary : colors.brand.primary}
                           />
-                          <Text variant="caption" bold tone="onDark" className="ml-1.5">
+                          <Text variant="caption" bold tone={active ? 'onDark' : 'primary'} className="ml-1.5">
                             {r.label}
                           </Text>
                         </Pressable>
@@ -288,6 +297,7 @@ export default function HiddenDiscussionScreen() {
                   responses={responsesQuery.data ?? []}
                   error={responsesQuery.error ?? null}
                   postStatus={post.status}
+                  isLoading={responsesQuery.isLoading}
                 />
 
                 {/* Comments (composer only — comments are read-when-implemented in Phase 4) */}
@@ -295,7 +305,7 @@ export default function HiddenDiscussionScreen() {
                   className="mt-6 pt-4"
                   style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
                 >
-                  <Text variant="title" tone="onDark" className="mb-1">
+                  <Text variant="title" tone="primary" className="mb-1">
                     Comments
                   </Text>
                   <Text variant="caption" tone="tertiary" className="mb-3">
@@ -316,7 +326,7 @@ export default function HiddenDiscussionScreen() {
                         onChangeText={setCommentDraft}
                         placeholder="Comment on this discussion…"
                         placeholderTextColor={colors.text.tertiary}
-                        className="text-text-onDark min-h-[36px] max-h-[80px] p-0"
+                        className="text-text-primary min-h-[36px] max-h-[80px] p-0"
                         multiline
                         editable={!commentMutation.isPending}
                         accessibilityLabel="Comment"
@@ -340,7 +350,7 @@ export default function HiddenDiscussionScreen() {
                           opacity: commentMutation.isPending || commentDraft.trim().length === 0 ? 0.55 : 1,
                         }}
                       >
-                        <Text variant="caption" bold tone="onDark">
+                        <Text variant="caption" bold tone="primary">
                           {commentMutation.isPending ? 'Posting…' : 'Post comment'}
                         </Text>
                       </Pressable>
@@ -363,7 +373,7 @@ export default function HiddenDiscussionScreen() {
               >
                 <View className="mb-3 flex-row items-center justify-between">
                   <View className="flex-1">
-                    <Text variant="title" tone="onDark">
+                    <Text variant="title" tone="primary">
                       Submit your response
                     </Text>
                     <Text variant="caption" tone="tertiary" className="mt-1">
@@ -395,7 +405,7 @@ export default function HiddenDiscussionScreen() {
                         opacity: revealMutation.isPending ? 0.55 : 1,
                       }}
                     >
-                      <Text variant="caption" bold tone="onDark">
+                      <Text variant="caption" bold tone="primary">
                         Reveal now
                       </Text>
                     </Pressable>
@@ -415,7 +425,7 @@ export default function HiddenDiscussionScreen() {
                       onChangeText={setDraft}
                       placeholder="Write a comment…"
                       placeholderTextColor={colors.text.tertiary}
-                      className="text-text-onDark min-h-[36px] max-h-[120px] p-0"
+                      className="text-text-primary min-h-[36px] max-h-[120px] p-0"
                       multiline
                       editable={!submitMutation.isPending}
                       accessibilityLabel="Your response"
@@ -462,9 +472,9 @@ export default function HiddenDiscussionScreen() {
                       style={{ backgroundColor: colors.brand.primary }}
                     >
                       {submitMutation.isPending ? (
-                        <ActivityIndicator color={colors.text.onDark} size="small" />
+                        <ActivityIndicator color={colors.brand.onPrimary} size="small" />
                       ) : (
-                        <MaterialCommunityIcons name="send" size={18} color={colors.text.onDark} />
+                        <MaterialCommunityIcons name="send" size={18} color={colors.brand.onPrimary} />
                       )}
                     </Pressable>
                   </View>
@@ -497,12 +507,12 @@ function PostBody({ post }: { post: PostDetail }) {
           className="items-center justify-center mr-3"
           style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: 9999, backgroundColor: avatarColor }}
         >
-          <Text variant="metaStrong" tone="onDark">
+          <Text variant="metaStrong" tone="primary">
             {initials}
           </Text>
         </View>
         <View className="flex-1 min-w-0">
-          <Text variant="bodyStrong" tone="onDark" numberOfLines={1}>
+          <Text variant="bodyStrong" tone="primary" numberOfLines={1}>
             {post.authorName ?? 'Unknown author'}
           </Text>
           <Text variant="meta" tone="tertiary" className="mt-0.5">
@@ -512,7 +522,7 @@ function PostBody({ post }: { post: PostDetail }) {
       </View>
 
       {/* Caption */}
-      <Text variant="h2" tone="onDark" className="mb-4">
+      <Text variant="h2" tone="primary" className="mb-4">
         {post.caption}
       </Text>
 
@@ -526,14 +536,18 @@ function ResponsesSection({
   responses,
   error,
   postStatus,
+  isLoading,
 }: {
   responses: ResponseItem[];
   error: unknown;
   postStatus: string;
+  isLoading: boolean;
 }) {
   const errorMessage =
     error instanceof Error ? error.message : 'Could not load responses.';
-  const showHiddenNotice = postStatus === 'active' && error !== null;
+  // Show hidden notice whenever post is active — not only when error exists,
+  // to avoid flicker during fetch where error is briefly null.
+  const showHiddenNotice = postStatus === 'active';
 
   return (
     <View
@@ -541,7 +555,7 @@ function ResponsesSection({
       style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
     >
       <View className="flex-row items-center justify-between mb-3">
-        <Text variant="title" tone="onDark">
+        <Text variant="title" tone="primary">
           Responses
         </Text>
         {postStatus === 'active' ? (
@@ -551,13 +565,15 @@ function ResponsesSection({
         )}
       </View>
 
-      {showHiddenNotice ? (
+      {isLoading ? (
+        <View className="py-3 items-center">
+          <ActivityIndicator color={colors.brand.primary} />
+        </View>
+      ) : showHiddenNotice ? (
         <Text variant="caption" tone="tertiary" className="mb-3">
-          {errorMessage}
+          {error ? errorMessage : 'Responses are hidden until reveal.'}
         </Text>
-      ) : null}
-
-      {responses.length === 0 && !showHiddenNotice ? (
+      ) : responses.length === 0 ? (
         <Text variant="caption" tone="tertiary">
           No responses yet. Be the first.
         </Text>
@@ -586,15 +602,15 @@ function ResponseRow({ item }: { item: ResponseItem }) {
           backgroundColor: HERO_OVERLAY_STRONG,
         }}
       >
-        <Text variant="caption" bold tone="onDark">
+        <Text variant="caption" bold tone="primary">
           {initials}
         </Text>
       </View>
       <View className="flex-1 min-w-0">
-        <Text variant="bodyStrong" tone="onDark" numberOfLines={1}>
+        <Text variant="bodyStrong" tone="primary" numberOfLines={1}>
           {item.authorName ?? 'Anonymous'}
         </Text>
-        <Text variant="body" tone="onDark" className="mt-1">
+        <Text variant="body" tone="primary" className="mt-1">
           {item.body}
         </Text>
       </View>
@@ -618,7 +634,7 @@ function MediaPreview({ item }: { item: PostMediaItem }) {
           <MaterialCommunityIcons
             name="play-circle-outline"
             size={36}
-            color={colors.text.onDark}
+            color={colors.brand.primary}
           />
         </View>
       )}

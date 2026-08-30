@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { View, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -55,18 +55,25 @@ export default function GroupsScreen() {
   useRefreshOnFocus(['groups', 'mine']);
   useRefreshOnFocus(['invites', 'pending']);
 
-  const onRefresh = useCallback(() => {
-    groupsQuery.refetch();
-    invitesQuery.refetch();
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setManualRefreshing(true);
+    try {
+      await Promise.all([groupsQuery.refetch(), invitesQuery.refetch()]);
+    } finally {
+      setManualRefreshing(false);
+    }
   }, [groupsQuery, invitesQuery]);
 
   const groups = groupsQuery.data?.groups ?? [];
   const invites = invitesQuery.data?.invites ?? [];
 
-  const isInitialLoad = groupsQuery.isLoading && !groupsQuery.data;
+  const isInitialLoad =
+    (groupsQuery.isLoading || invitesQuery.isLoading) && !groupsQuery.data && !invitesQuery.data;
   const showEmptyState =
     !isInitialLoad &&
     !groupsQuery.error &&
+    !invitesQuery.error &&
     groups.length === 0 &&
     invites.length === 0;
 
@@ -155,10 +162,7 @@ export default function GroupsScreen() {
           }
           refreshControl={
             <RefreshControl
-              refreshing={
-                (groupsQuery.isFetching && !groupsQuery.isLoading) ||
-                (invitesQuery.isFetching && !invitesQuery.isLoading)
-              }
+              refreshing={manualRefreshing}
               onRefresh={onRefresh}
               tintColor={colors.brand.primary}
             />
@@ -186,11 +190,13 @@ type InviteRowProps = {
 };
 
 function InviteRow({ invite, onAccepted, onChanged, showError }: InviteRowProps) {
+  const queryClient = useQueryClient();
   const acceptMut = useMutation({
     mutationFn: () => acceptInvite(invite.id),
     onSuccess: () => {
       onAccepted();
       onChanged();
+      queryClient.invalidateQueries({ queryKey: ['users', 'me', 'stats'] });
     },
     onError: (e) => {
       showError(e instanceof Error ? e.message : 'Try again');

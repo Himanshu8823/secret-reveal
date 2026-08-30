@@ -52,7 +52,7 @@ export default function CreateCaptionScreen() {
   };
 
   const onClose = () => {
-    router.dismissTo('/(app)/home');
+    router.replace('/(app)');
   };
 
   return (
