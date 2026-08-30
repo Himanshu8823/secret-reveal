@@ -103,6 +103,8 @@ export type PostDetail = {
   groupName: string;
   caption: string;
   status: PostStatus;
+  allowedInteractions: string[];
+  ratingScale: number | null;
   createdAt: string;
   updatedAt: string;
   media: PostMediaItem[];
@@ -110,7 +112,9 @@ export type PostDetail = {
   responseCount: number;
   reactionCount: number;
   commentCount: number;
-  viewerReaction: ReactionType | null;
+  viewerReaction: string | null;
+  viewerYesNoVote: string | null;
+  viewerRating: number | null;
 };
 
 export async function getPost(postId: string): Promise<PostDetail> {
@@ -132,12 +136,15 @@ export async function getPost(postId: string): Promise<PostDetail> {
  */
 export type CreatePostInput = {
   /** Selected member user ids. Order-insensitive set on the server side. */
-  memberIds: string[];
+  memberIds?: string[];
+  groupId?: string;
   caption: string;
   /** UUIDs of Media rows already uploaded in Phase 3b. */
   mediaIds?: string[];
   timerMinutes: number;
   groupName?: string;
+  allowedInteractions?: string[];
+  ratingScale?: number | null;
 };
 
 export type CreatedPost = {
@@ -181,7 +188,7 @@ export async function revealPost(postId: string): Promise<PostDetail> {
 
 // --- Reactions ------------------------------------------------------------
 
-export type ToggleReactionInput = { type?: ReactionType };
+export type ToggleReactionInput = { type?: string };
 
 export type ToggleReactionResponse = {
   /** Whether the caller is now reacted (after the toggle). */
@@ -189,7 +196,7 @@ export type ToggleReactionResponse = {
   count: number;
   /** Active reaction type. Equal to the input `type` on create, or the
    *  previous type on removal. */
-  type: ReactionType;
+  type: string;
 };
 
 export async function toggleReaction(
@@ -201,6 +208,26 @@ export async function toggleReaction(
       `/posts/${postId}/reactions`,
       input,
     ),
+  );
+}
+
+export async function toggleReactionAny(postId: string, type: string): Promise<ToggleReactionResponse> {
+  return unwrap<ToggleReactionResponse>(
+    apiClient.post<ApiEnvelope<ToggleReactionResponse>>(`/posts/${postId}/reactions-any`, { type }),
+  );
+}
+
+export async function voteYesNo(postId: string, value: 'yes' | 'no') {
+  return unwrap<unknown>(apiClient.post<ApiEnvelope<unknown>>(`/posts/${postId}/votes`, { value }));
+}
+
+export async function ratePost(postId: string, value: number) {
+  return unwrap<unknown>(apiClient.post<ApiEnvelope<unknown>>(`/posts/${postId}/ratings`, { value }));
+}
+
+export async function getMyVote(postId: string) {
+  return unwrap<{ yesNo: unknown; rating: unknown; reaction: unknown }>(
+    apiClient.get<ApiEnvelope<{ yesNo: unknown; rating: unknown; reaction: unknown }>>(`/posts/${postId}/my-vote`),
   );
 }
 

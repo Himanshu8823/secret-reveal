@@ -7,12 +7,18 @@ import {
 } from '../../middlewares/rateLimiter.js';
 import {
   getComments,
+  getMyVoteDetail,
   getPostDetail,
   getPosts,
+  getRatings,
   getResponses,
+  getVotes,
   postComment,
   postCreate,
+  postRating,
+  postReactionAny,
   postResponse,
+  postYesNoVote,
 } from './posts.controller.js';
 
 /**
@@ -48,3 +54,9 @@ postsRouter.post(
   rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'),
   postComment,
 );
+postsRouter.post('/:id/votes', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postYesNoVote);
+postsRouter.get('/:id/votes', getVotes);
+postsRouter.post('/:id/ratings', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postRating);
+postsRouter.get('/:id/ratings', getRatings);
+postsRouter.post('/:id/reactions-any', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postReactionAny);
+postsRouter.get('/:id/my-vote', getMyVoteDetail);

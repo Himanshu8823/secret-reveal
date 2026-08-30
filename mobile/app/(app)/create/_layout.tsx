@@ -17,6 +17,7 @@ export default function CreateLayout() {
     >
       <Stack.Screen name="index" />
       <Stack.Screen name="timer" />
+      <Stack.Screen name="groups" />
       <Stack.Screen name="invites" />
     </Stack>
   );

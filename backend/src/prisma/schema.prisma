@@ -30,6 +30,8 @@ model User {
   reactions      Reaction[]
   comments       Comment[]
   media          Media[]
+  yesNoVotes     YesNoVote[]
+  ratings        Rating[]
 
   @@map("users")
 }
@@ -131,14 +133,16 @@ model Media {
 }
 
 model Post {
-  id          String   @id @default(uuid()) @db.Uuid
-  authorId    String   @db.Uuid
-  groupId     String   @db.Uuid
-  caption     String   @db.VarChar(2000)
-  status      String   @default("active") @db.VarChar(20)  // active | revealed | deleted
-  createdAt   DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt          @db.Timestamptz(6)
-  deletedAt   DateTime?
+  id                  String   @id @default(uuid()) @db.Uuid
+  authorId            String   @db.Uuid
+  groupId             String   @db.Uuid
+  caption             String   @db.VarChar(2000)
+  status              String   @default("active") @db.VarChar(20)  // active | revealed | deleted
+  allowedInteractions String[] @default([]) // e.g. ["yesNo","textComment","reaction","rating","like"]
+  ratingScale         Int?     // 5 or 10, required when rating ∈ allowedInteractions
+  createdAt           DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt          @db.Timestamptz(6)
+  deletedAt           DateTime?
 
   author         User           @relation("author", fields: [authorId], references: [id], onDelete: Cascade)
   group          Group          @relation(fields: [groupId], references: [id], onDelete: Restrict)
@@ -147,6 +151,8 @@ model Post {
   responses      Response[]
   reactions      Reaction[]
   comments       Comment[]
+  yesNoVotes     YesNoVote[]
+  ratings        Rating[]
 
   @@index([groupId, createdAt(sort: Desc)])
   @@index([authorId, createdAt(sort: Desc)])
@@ -214,7 +220,7 @@ model ResponseMedia {
 model Reaction {
   postId    String   @db.Uuid
   userId    String   @db.Uuid
-  type      String   @default("like") @db.VarChar(20)
+  type      String   @default("like") @db.VarChar(20) // single emoji unicode (e.g. "❤️","😂","🔥") or "like"
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
@@ -223,6 +229,36 @@ model Reaction {
   @@id([postId, userId])
   @@index([postId])
   @@map("reactions")
+}
+
+model YesNoVote {
+  postId    String   @db.Uuid
+  userId    String   @db.Uuid
+  value     String   @db.VarChar(3) // "yes" | "no"
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([postId])
+  @@map("yes_no_votes")
+}
+
+model Rating {
+  postId    String   @db.Uuid
+  userId    String   @db.Uuid
+  value     Int // 1..5 when ratingScale=5, 1..10 when ratingScale=10
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([postId])
+  @@map("ratings")
 }
 
 model Comment {

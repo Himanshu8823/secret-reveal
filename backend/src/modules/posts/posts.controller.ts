@@ -2,18 +2,27 @@ import type { Request, Response, NextFunction } from 'express';
 import {
   createComment as createCommentService,
   createPost as createPostService,
+  getMyVote as getMyVoteService,
   getPost as getPostService,
   listComments as listCommentsService,
   listPosts as listPostsService,
+  listRatings as listRatingsService,
   listResponses as listResponsesService,
+  listVotes as listVotesService,
+  submitRating as submitRatingService,
   submitResponse as submitResponseService,
+  submitYesNoVote as submitYesNoVoteService,
+  toggleReactionAny as toggleReactionAnyService,
 } from './posts.service.js';
 import {
   createCommentSchema,
   createPostSchema,
   listPostsQuerySchema,
   postIdParamSchema,
+  ratingSchema,
+  reactionSchema,
   submitResponseSchema,
+  yesNoVoteSchema,
 } from './posts.validation.js';
 
 /**
@@ -47,6 +56,8 @@ export async function postCreate(req: Request, res: Response, next: NextFunction
       mediaIds: body.mediaIds,
       timerMinutes: body.timerMinutes,
       groupName: body.groupName,
+      allowedInteractions: body.allowedInteractions,
+      ratingScale: body.ratingScale ?? null,
     });
     res.status(201).json({ success: true, data: result });
   } catch (err) {
@@ -136,6 +147,75 @@ export async function postComment(req: Request, res: Response, next: NextFunctio
       body: body.body,
     });
     res.status(201).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function postYesNoVote(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const body = yesNoVoteSchema.parse(req.body);
+    const result = await submitYesNoVoteService({ viewerId: user.id, postId: id, value: body.value });
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function postRating(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const body = ratingSchema.parse(req.body);
+    const result = await submitRatingService({ viewerId: user.id, postId: id, value: body.value });
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function postReactionAny(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const body = reactionSchema.parse(req.body);
+    const result = await toggleReactionAnyService({ viewerId: user.id, postId: id, type: body.type });
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getMyVoteDetail(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const result = await getMyVoteService(user.id, id);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getVotes(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const result = await listVotesService(user.id, id);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getRatings(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const result = await listRatingsService(user.id, id);
+    res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

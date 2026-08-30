@@ -20,7 +20,7 @@ export class MockOtpProvider implements OtpProvider {
   private static readonly FIXED_DEV_OTP = '123456';
 
   generateOtp(): string {
-    if (true) {
+    if (env.NODE_ENV === 'development') {
       return MockOtpProvider.FIXED_DEV_OTP;
     }
     return randomInt(0, 1_000_000).toString().padStart(6, '0');

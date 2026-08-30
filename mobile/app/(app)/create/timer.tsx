@@ -70,7 +70,7 @@ export default function CreateTimerScreen() {
       if (!preset || preset.minutes === null) return;
       setTimer(preset.minutes);
     }
-    router.push('/(app)/create/invites');
+    router.push('/(app)/create/groups');
   };
 
   const onBack = () => router.back();

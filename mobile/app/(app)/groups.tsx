@@ -17,6 +17,7 @@ import { EmptyState } from '../../src/components/EmptyState';
 import { Button, Text, useDialog } from '../../src/components/ui';
 import { useRefreshOnFocus } from '../../src/hooks/useRefreshOnFocus';
 import { colors, elevation, radius } from '../../src/theme';
+import { GroupRowSkeleton } from '../../src/components/skeleton/Skeleton';
 
 /**
  * Groups tab.
@@ -41,11 +42,18 @@ export default function GroupsScreen() {
   const groupsQuery = useQuery({
     queryKey: ['groups', 'mine'],
     queryFn: () => listMyGroups(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    placeholderData: (prev) => prev,
   });
 
   const invitesQuery = useQuery({
     queryKey: ['invites', 'pending'],
     queryFn: () => listPendingInvites(),
+    staleTime: 15_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   // Refresh when this tab regains focus (e.g. user came back from
@@ -155,8 +163,10 @@ export default function GroupsScreen() {
           contentContainerClassName="px-4 pb-24"
           ListEmptyComponent={
             isInitialLoad ? (
-              <View className="py-6 items-center">
-                <ActivityIndicator color={colors.brand.primary} />
+              <View className="gap-2">
+                <GroupRowSkeleton />
+                <GroupRowSkeleton />
+                <GroupRowSkeleton />
               </View>
             ) : null
           }

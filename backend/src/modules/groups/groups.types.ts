@@ -19,6 +19,7 @@ export type GroupSummary = {
   lastActivityAt: Date;
   createdAt: Date;
   memberCount: number;
+  postCount: number;
   // Phase 3a populates this; for now the column is null.
   latestPost: null;
 };
@@ -30,6 +31,7 @@ export type GroupWithMembers = {
   createdAt: Date;
   updatedAt: Date;
   members: GroupMemberSummary[];
+  postCount: number;
 };
 
 export type ListMyGroupsResult = {

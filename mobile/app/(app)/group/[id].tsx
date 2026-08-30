@@ -13,6 +13,8 @@ import { leaveGroup, getGroup } from '../../../src/api/groups.api';
 import { listPosts } from '../../../src/api/posts.api';
 import { PostCard } from '../../../src/components/PostCard';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { PostCardSkeleton, Skeleton } from '../../../src/components/skeleton/Skeleton';
+import { useRefreshOnFocus } from '../../../src/hooks/useRefreshOnFocus';
 
 /**
  * Group detail screen. Header shows group name + member count; the list
@@ -34,13 +36,23 @@ export default function GroupDetailScreen() {
     queryKey: ['group', groupId],
     queryFn: () => getGroup(groupId),
     enabled: Boolean(groupId),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   const postsQuery = useQuery({
     queryKey: ['group', groupId, 'posts'],
     queryFn: () => listPosts({ groupId }),
     enabled: Boolean(groupId),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    placeholderData: (prev) => prev,
   });
+
+  useRefreshOnFocus(['group', groupId]);
+  useRefreshOnFocus(['group', groupId, 'posts']);
 
   const leaveMut = useMutation({
     mutationFn: () => leaveGroup(groupId),
@@ -111,7 +123,7 @@ export default function GroupDetailScreen() {
           </Text>
           <Text variant="meta" tone="secondary" className="mt-0.5">
             {group
-              ? `${group.members.length} member${group.members.length === 1 ? '' : 's'}`
+              ? `${group.members.length} member${group.members.length === 1 ? '' : 's'} · ${(group as unknown as { postCount?: number }).postCount ?? posts.length} posts`
               : ' '}
           </Text>
         </View>
@@ -144,7 +156,12 @@ export default function GroupDetailScreen() {
         )}
         contentContainerClassName="px-4 pt-4 pb-24 flex-grow"
         ListEmptyComponent={
-          isInitialLoad ? null : postsQuery.error ? (
+          isInitialLoad ? (
+            <View className="gap-3 pt-2">
+              <PostCardSkeleton />
+              <PostCardSkeleton />
+            </View>
+          ) : postsQuery.error ? (
             <EmptyState
               iconName="cloud-off-outline"
               title="Couldn't load discussions"

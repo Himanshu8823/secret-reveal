@@ -22,9 +22,12 @@ import {
   createComment as createCommentApi,
   getPost,
   listResponses,
+  ratePost,
   revealPost,
   submitResponse,
   toggleReaction,
+  toggleReactionAny,
+  voteYesNo,
   type PostDetail,
   type PostMediaItem,
   type ReactionType,
@@ -61,11 +64,13 @@ const HERO_ICON_MUTED = colors.text.tertiary;
 const HERO_BORDER = colors.border.DEFAULT;
 const HERO_ERROR = colors.semantic.danger;
 
-const REACTIONS: { type: ReactionType; icon: string; label: string }[] = [
+const REACTIONS: { type: string; icon: string; label: string }[] = [
   { type: 'like', icon: 'heart-outline', label: 'Like' },
   { type: 'love', icon: 'heart', label: 'Love' },
   { type: 'laugh', icon: 'happy-outline', label: 'Haha' },
 ];
+
+const EMOJI_PICKER = ['❤️', '😂', '🔥', '🙏', '😮', '😢', '👍', '👏', '🎉', '😍', '🤔', '👌'];
 
 export default function HiddenDiscussionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -140,13 +145,35 @@ export default function HiddenDiscussionScreen() {
   });
 
   const reactionMutation = useMutation({
-    mutationFn: (type: ReactionType) => toggleReaction(postId, { type }),
+    mutationFn: (type: string) => toggleReaction(postId, { type }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
       queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
       if (post?.groupId) {
         queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
       }
+    },
+  });
+
+  const reactionAnyMutation = useMutation({
+    mutationFn: (emoji: string) => toggleReactionAny(postId, emoji),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['post', postId] });
+      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+    },
+  });
+
+  const yesNoMutation = useMutation({
+    mutationFn: (value: 'yes' | 'no') => voteYesNo(postId, value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['post', postId] });
+    },
+  });
+
+  const ratingMutation = useMutation({
+    mutationFn: (value: number) => ratePost(postId, value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['post', postId] });
     },
   });
 
@@ -227,8 +254,10 @@ export default function HiddenDiscussionScreen() {
             </View>
 
             {isInitialLoad ? (
-              <View className="py-12 items-center">
-                <ActivityIndicator color={colors.brand.primary} />
+              <View className="gap-3 pt-2">
+                <View className="h-6 w-24 rounded-full" style={{ backgroundColor: colors.surface.muted, borderRadius: 9999 }} />
+                <View className="h-4 w-full rounded-md" style={{ backgroundColor: colors.surface.muted }} />
+                <View className="h-40 w-full rounded-lg" style={{ backgroundColor: colors.surface.muted, borderRadius: 16 }} />
               </View>
             ) : postQuery.error ? (
               <View className="py-8 items-center">
@@ -251,45 +280,80 @@ export default function HiddenDiscussionScreen() {
 
             {post ? (
               <>
-                {/* Reactions bar */}
+                {/* Dynamic Interaction bar */}
                 <View
                   className="mt-6 pt-4"
                   style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
                 >
                   <Text variant="title" tone="primary" className="mb-3">
-                    React
+                    Interact
                   </Text>
-                  <View className="flex-row items-center gap-3">
-                    {REACTIONS.map((r) => {
-                      const active = post.viewerReaction === r.type;
-                      return (
-                        <Pressable
-                          key={r.type}
-                          accessibilityRole="button"
-                          accessibilityLabel={r.label}
-                          accessibilityState={{ selected: active }}
-                          onPress={() => reactionMutation.mutate(r.type)}
-                          disabled={reactionMutation.isPending}
-                          className="flex-row items-center px-3 py-2 rounded-md active:opacity-80"
-                          style={{
-                            backgroundColor: active ? colors.brand.primary : HERO_OVERLAY_STRONG,
-                          }}
-                        >
-                          <Ionicons
-                            name={r.icon as never}
-                            size={16}
-                            color={active ? colors.brand.onPrimary : colors.brand.primary}
-                          />
-                          <Text variant="caption" bold tone={active ? 'onDark' : 'primary'} className="ml-1.5">
-                            {r.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                    <Text variant="meta" tone="tertiary" className="ml-1">
-                      {post.reactionCount} {post.reactionCount === 1 ? 'reaction' : 'reactions'}
-                    </Text>
-                  </View>
+
+                  {/* Like */}
+                  {(post.allowedInteractions ?? []).includes('like') ? (
+                    <View className="mb-3">
+                      <Pressable
+                        onPress={() => reactionMutation.mutate('like')}
+                        className="self-start flex-row items-center px-4 py-2 rounded-full border active:opacity-80"
+                        style={{ backgroundColor: post.viewerReaction === 'like' ? colors.brand.primary : colors.brand.primarySubtle, borderColor: colors.brand.primary }}
+                      >
+                        <Ionicons name={post.viewerReaction === 'like' ? 'heart' : 'heart-outline'} size={16} color={post.viewerReaction === 'like' ? colors.brand.onPrimary : colors.brand.primary} />
+                        <Text variant="caption" bold tone={post.viewerReaction === 'like' ? 'onDark' : 'primary'} className="ml-1.5">Like</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+
+                  {/* Yes/No */}
+                  {(post.allowedInteractions ?? []).includes('yesNo') ? (
+                    <View className="mb-3">
+                      <Text variant="caption" tone="secondary" className="mb-2">Vote</Text>
+                      <View className="flex-row gap-2">
+                        {(['yes', 'no'] as const).map((v) => {
+                          const active = (post as unknown as { viewerYesNoVote: string | null }).viewerYesNoVote === v;
+                          return (
+                            <Pressable key={v} onPress={() => yesNoMutation.mutate(v)} className={['flex-1 py-2.5 rounded-md border items-center', active ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}>
+                              <Text variant="bodyStrong" tone={active ? 'onDark' : 'primary'}>{v === 'yes' ? 'Yes' : 'No'}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Rating */}
+                  {(post.allowedInteractions ?? []).includes('rating') ? (
+                    <View className="mb-3">
+                      <Text variant="caption" tone="secondary" className="mb-2">Rating 1–{post.ratingScale ?? 5}</Text>
+                      <View className="flex-row flex-wrap gap-1.5">
+                        {Array.from({ length: post.ratingScale ?? 5 }, (_, i) => i + 1).map((n) => {
+                          const active = (post as unknown as { viewerRating: number | null }).viewerRating === n;
+                          return (
+                            <Pressable key={n} onPress={() => ratingMutation.mutate(n)} className={['w-10 h-10 rounded-md border items-center justify-center', active ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}>
+                              <Text variant="caption" bold tone={active ? 'onDark' : 'primary'}>{n}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Reaction any emoji */}
+                  {(post.allowedInteractions ?? []).includes('reaction') ? (
+                    <View className="mb-1">
+                      <Text variant="caption" tone="secondary" className="mb-2">React with emoji</Text>
+                      <View className="flex-row flex-wrap gap-2">
+                        {EMOJI_PICKER.map((emoji) => {
+                          const active = post.viewerReaction === emoji;
+                          return (
+                            <Pressable key={emoji} onPress={() => reactionAnyMutation.mutate(emoji)} className={['w-10 h-10 rounded-md border items-center justify-center', active ? 'bg-primary-subtle border-primary' : 'bg-surface border-border'].join(' ')}>
+                              <Text style={{ fontSize: 18 }}>{emoji}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                      <Text variant="meta" tone="tertiary" className="mt-2">{post.reactionCount} reactions</Text>
+                    </View>
+                  ) : null}
                 </View>
 
                 {/* Responses */}

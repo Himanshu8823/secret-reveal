@@ -8,6 +8,7 @@ export type GroupSummary = {
   lastActivityAt: string;
   createdAt: string;
   memberCount: number;
+  postCount: number;
   latestPost: null;
 };
 

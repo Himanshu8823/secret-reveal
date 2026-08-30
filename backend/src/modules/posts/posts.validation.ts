@@ -20,6 +20,9 @@ import { z } from 'zod';
  *   defeat the "discussion" mechanic), 24 hour ceiling (anything longer is
  *   essentially "never reveals" and would clog the reveal queue).
  */
+export const INTERACTION_TYPES = ['yesNo', 'textComment', 'reaction', 'rating', 'like'] as const;
+export type InteractionType = (typeof INTERACTION_TYPES)[number];
+
 export const createPostSchema = z
   .object({
     groupId: z.string().uuid('groupId must be a UUID').optional(),
@@ -38,7 +41,7 @@ export const createPostSchema = z
       ),
     mediaIds: z
       .array(z.string().uuid('mediaIds must be UUIDs'))
-      .max(4, 'A post can include at most 4 media items')
+      .max(5, 'A post can include at most 5 media items')
       .default([]),
     timerMinutes: z
       .number()
@@ -46,6 +49,12 @@ export const createPostSchema = z
       .min(5, 'timerMinutes must be at least 5')
       .max(1440, 'timerMinutes must be at most 1440 (24 hours)'),
     groupName: z.string().trim().min(1).max(60).optional(),
+    allowedInteractions: z
+      .array(z.enum(INTERACTION_TYPES))
+      .min(1, 'Pick at least one interaction type')
+      .max(5)
+      .default(['textComment']),
+    ratingScale: z.union([z.literal(5), z.literal(10)]).optional().nullable(),
   })
   .refine(
     (b) => Boolean(b.groupId) !== Boolean(b.memberIds && b.memberIds.length > 0),
@@ -53,7 +62,42 @@ export const createPostSchema = z
       message: 'Provide exactly one of groupId or memberIds',
       path: ['groupId'],
     },
-  );
+  )
+  .superRefine((b, ctx) => {
+    const types = b.allowedInteractions ?? [];
+    const hasYesNo = types.includes('yesNo');
+    const hasRating = types.includes('rating');
+    if (hasYesNo && hasRating) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Yes/No and Rating cannot be used together',
+        path: ['allowedInteractions'],
+      });
+    }
+    // dedup check
+    if (new Set(types).size !== types.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Duplicate interaction types',
+        path: ['allowedInteractions'],
+      });
+    }
+    if (hasRating) {
+      if (b.ratingScale !== 5 && b.ratingScale !== 10) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Rating scale must be 5 or 10 when rating is enabled',
+          path: ['ratingScale'],
+        });
+      }
+    } else if (b.ratingScale != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Rating scale only allowed when rating interaction is enabled',
+        path: ['ratingScale'],
+      });
+    }
+  });
 
 export type CreatePostBody = z.infer<typeof createPostSchema>;
 
@@ -119,3 +163,18 @@ export const createCommentSchema = z.object({
 });
 
 export type CreateCommentBody = z.infer<typeof createCommentSchema>;
+
+export const yesNoVoteSchema = z.object({
+  value: z.enum(['yes', 'no']),
+});
+export type YesNoVoteBody = z.infer<typeof yesNoVoteSchema>;
+
+export const ratingSchema = z.object({
+  value: z.number().int().min(1).max(10),
+});
+export type RatingBody = z.infer<typeof ratingSchema>;
+
+export const reactionSchema = z.object({
+  type: z.string().min(1).max(20),
+});
+export type ReactionBody = z.infer<typeof reactionSchema>;

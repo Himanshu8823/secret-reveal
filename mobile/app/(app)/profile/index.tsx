@@ -41,10 +41,14 @@ export default function ProfileScreen() {
   const profileQuery = useQuery({
     queryKey: ['users', 'me'],
     queryFn: () => getMe(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
   const statsQuery = useQuery({
     queryKey: ['users', 'me', 'stats'],
     queryFn: () => getMyStats(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
   });
 
   // Profile screen should always show fresh data when the tab regains

@@ -11,6 +11,8 @@ import { Fab } from '../../src/components/Fab';
 import { EmptyState } from '../../src/components/EmptyState';
 import { Text } from '../../src/components/ui';
 import { colors } from '../../src/theme';
+import { GroupRowSkeleton, PostCardSkeleton } from '../../src/components/skeleton/Skeleton';
+import { useRefreshOnFocus } from '../../src/hooks/useRefreshOnFocus';
 
 /**
  * Home screen — Phase 3a.
@@ -29,20 +31,25 @@ export default function HomeScreen() {
   const groupsQuery = useQuery({
     queryKey: ['groups', 'mine'],
     queryFn: () => listMyGroups(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   const feedQuery = useQuery({
     queryKey: ['posts', 'feed'],
     queryFn: () => listPosts({ limit: 10 }),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    placeholderData: (prev) => prev,
     // Poll every 60s while the feed is mounted so posts from other
     // group members land within a minute without needing a WebSocket.
-    // The interval pauses automatically when the query is unmounted
-    // (user navigates away) and resumes on remount. Paired with
-    // refetchOnWindowFocus via the root layout, this gives both
-    // "background → foreground" instant refresh and a continuous
-    // gentle tick while the user is actively browsing.
     refetchInterval: 60_000,
   });
+
+  useRefreshOnFocus(['groups', 'mine']);
+  useRefreshOnFocus(['posts', 'feed']);
 
   const onRefresh = useCallback(() => {
     groupsQuery.refetch();
@@ -94,8 +101,9 @@ export default function HomeScreen() {
             </View>
 
             {isInitialFeedLoad ? (
-              <View className="py-6 items-center">
-                <ActivityIndicator color={colors.brand.primary} />
+              <View className="gap-3">
+                <PostCardSkeleton />
+                <PostCardSkeleton />
               </View>
             ) : feedQuery.error ? (
               <View className="py-4">
@@ -142,7 +150,13 @@ export default function HomeScreen() {
           </View>
         }
         ListEmptyComponent={
-          isInitialGroupsLoad ? null : groupsQuery.error ? (
+          isInitialGroupsLoad ? (
+            <View className="gap-2 pt-2">
+              <GroupRowSkeleton />
+              <GroupRowSkeleton />
+              <GroupRowSkeleton />
+            </View>
+          ) : groupsQuery.error ? (
             <View className="flex-1 items-center justify-center">
               <EmptyState
                 iconName="cloud-off-outline"

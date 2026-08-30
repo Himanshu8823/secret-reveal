@@ -64,7 +64,7 @@ import type {
  * fails loudly instead of silently picking one.
  */
 export async function createPost(input: CreatePostInput): Promise<CreatePostResult> {
-  const { authorId, groupId, memberIds, caption, mediaIds, timerMinutes } = input;
+  const { authorId, groupId, memberIds, caption, mediaIds, timerMinutes, allowedInteractions, ratingScale } = input;
 
   if (Boolean(groupId) === Boolean(memberIds && memberIds.length > 0)) {
     throw new AppError(
@@ -132,6 +132,8 @@ export async function createPost(input: CreatePostInput): Promise<CreatePostResu
         groupId: resolvedGroupId,
         caption,
         status: 'active',
+        allowedInteractions: allowedInteractions ?? [],
+        ratingScale: ratingScale ?? null,
         media: {
           create: mediaIds.map((mediaId, idx) => ({ mediaId, order: idx })),
         },
@@ -187,6 +189,8 @@ export async function createPost(input: CreatePostInput): Promise<CreatePostResu
     groupId: post.groupId,
     caption: post.caption,
     status: post.status,
+    allowedInteractions: (post as unknown as { allowedInteractions: string[] }).allowedInteractions ?? [],
+    ratingScale: (post as unknown as { ratingScale: number | null }).ratingScale ?? null,
     createdAt: post.createdAt,
     updatedAt: post.updatedAt,
     media: mediaItems,
@@ -237,10 +241,20 @@ async function loadPostFromDb(viewerId: string, postId: string): Promise<PostDet
     throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member of this group');
   }
 
-  const viewerReactionRow = await prisma.reaction.findUnique({
-    where: { postId_userId: { postId, userId: viewerId } },
-    select: { type: true },
-  });
+  const [viewerReactionRow, viewerYesNoRow, viewerRatingRow] = await Promise.all([
+    prisma.reaction.findUnique({
+      where: { postId_userId: { postId, userId: viewerId } },
+      select: { type: true },
+    }),
+    prisma.yesNoVote.findUnique({
+      where: { postId_userId: { postId, userId: viewerId } },
+      select: { value: true },
+    }),
+    prisma.rating.findUnique({
+      where: { postId_userId: { postId, userId: viewerId } },
+      select: { value: true },
+    }),
+  ]);
 
   const media: PostMediaItem[] = post.media.map((pm) => ({
     id: pm.media.id,
@@ -267,6 +281,8 @@ async function loadPostFromDb(viewerId: string, postId: string): Promise<PostDet
     groupName: post.group.name,
     caption: post.caption,
     status: post.status,
+    allowedInteractions: (post as unknown as { allowedInteractions: string[] }).allowedInteractions ?? [],
+    ratingScale: (post as unknown as { ratingScale: number | null }).ratingScale ?? null,
     createdAt: post.createdAt,
     updatedAt: post.updatedAt,
     media,
@@ -275,6 +291,8 @@ async function loadPostFromDb(viewerId: string, postId: string): Promise<PostDet
     reactionCount: post._count.reactions,
     commentCount: post._count.comments,
     viewerReaction: viewerReactionRow?.type ?? null,
+    viewerYesNoVote: viewerYesNoRow?.value ?? null,
+    viewerRating: viewerRatingRow?.value ?? null,
   };
 }
 
@@ -552,6 +570,8 @@ export async function listPosts(input: ListPostsInput): Promise<ListPostsResult>
       groupName: p.group.name,
       caption: p.caption,
       status: p.status,
+      allowedInteractions: (p as unknown as { allowedInteractions: string[] }).allowedInteractions ?? [],
+      ratingScale: (p as unknown as { ratingScale: number | null }).ratingScale ?? null,
       createdAt: p.createdAt,
       media,
       discussionMeta: meta,
@@ -736,4 +756,121 @@ export async function revealDuePosts(now: Date = new Date()): Promise<string[]> 
   }
 
   return revealed;
+}
+
+// ---------------------------------------------------------------------------
+// YesNo / Rating / Reactions (any emoji)
+// ---------------------------------------------------------------------------
+
+async function ensureInteractionAllowed(postId: string, viewerId: string, needed: string) {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    select: { id: true, groupId: true, status: true, allowedInteractions: true, ratingScale: true },
+  });
+  if (!post) throw new AppError(404, ErrorCode.VALIDATION_FAILED, 'Post not found');
+  const membership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId: post.groupId, userId: viewerId } },
+    select: { groupId: true },
+  });
+  if (!membership) throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member of this group');
+  const allowed = (post as unknown as { allowedInteractions: string[] }).allowedInteractions ?? [];
+  if (!allowed.includes(needed)) {
+    throw new AppError(400, ErrorCode.VALIDATION_FAILED, `${needed} not enabled for this post`);
+  }
+  return post;
+}
+
+export async function submitYesNoVote(input: { viewerId: string; postId: string; value: 'yes' | 'no' }) {
+  const { viewerId, postId, value } = input;
+  await ensureInteractionAllowed(postId, viewerId, 'yesNo');
+  // hidden gating still allows writing pre-reveal
+  const vote = await prisma.yesNoVote.upsert({
+    where: { postId_userId: { postId, userId: viewerId } },
+    create: { postId, userId: viewerId, value },
+    update: { value },
+  });
+  await cacheDel(`cache:post:${postId}:viewer:${viewerId}`);
+  await cacheDelPattern(`cache:post:${postId}:votes:*`);
+  logger.info({ postId, viewerId, value }, 'yesNo vote');
+  return vote;
+}
+
+export async function submitRating(input: { viewerId: string; postId: string; value: number }) {
+  const { viewerId, postId, value } = input;
+  const post = await ensureInteractionAllowed(postId, viewerId, 'rating');
+  const scale = (post as unknown as { ratingScale: number | null }).ratingScale ?? 5;
+  if (value < 1 || value > scale) {
+    throw new AppError(400, ErrorCode.VALIDATION_FAILED, `Rating must be between 1 and ${scale}`);
+  }
+  const rating = await prisma.rating.upsert({
+    where: { postId_userId: { postId, userId: viewerId } },
+    create: { postId, userId: viewerId, value },
+    update: { value },
+  });
+  await cacheDel(`cache:post:${postId}:viewer:${viewerId}`);
+  await cacheDelPattern(`cache:post:${postId}:ratings:*`);
+  logger.info({ postId, viewerId, value }, 'rating');
+  return rating;
+}
+
+export async function toggleReactionAny(input: { viewerId: string; postId: string; type: string }) {
+  const { viewerId, postId, type } = input;
+  await ensureInteractionAllowed(postId, viewerId, 'reaction');
+  // any single emoji: if same type exists, remove (toggle off), else upsert
+  const existing = await prisma.reaction.findUnique({
+    where: { postId_userId: { postId, userId: viewerId } },
+    select: { type: true },
+  });
+  if (existing && existing.type === type) {
+    await prisma.reaction.delete({ where: { postId_userId: { postId, userId: viewerId } } });
+    await cacheDel(`cache:post:${postId}:viewer:${viewerId}`);
+    return { reacted: false, type, count: await prisma.reaction.count({ where: { postId } }) };
+  }
+  await prisma.reaction.upsert({
+    where: { postId_userId: { postId, userId: viewerId } },
+    create: { postId, userId: viewerId, type },
+    update: { type },
+  });
+  await cacheDel(`cache:post:${postId}:viewer:${viewerId}`);
+  return { reacted: true, type, count: await prisma.reaction.count({ where: { postId } }) };
+}
+
+export async function getMyVote(viewerId: string, postId: string) {
+  const post = await prisma.post.findUnique({ where: { id: postId }, select: { groupId: true } });
+  if (!post) throw new AppError(404, ErrorCode.VALIDATION_FAILED, 'Post not found');
+  const membership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId: post.groupId, userId: viewerId } },
+    select: { groupId: true },
+  });
+  if (!membership) throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member');
+  const [yesNo, rating, reaction] = await Promise.all([
+    prisma.yesNoVote.findUnique({ where: { postId_userId: { postId, userId: viewerId } } }),
+    prisma.rating.findUnique({ where: { postId_userId: { postId, userId: viewerId } } }),
+    prisma.reaction.findUnique({ where: { postId_userId: { postId, userId: viewerId } } }),
+  ]);
+  return { yesNo, rating, reaction };
+}
+
+export async function listVotes(viewerId: string, postId: string) {
+  const post = await prisma.post.findUnique({ where: { id: postId }, select: { groupId: true, status: true } });
+  if (!post) throw new AppError(404, ErrorCode.VALIDATION_FAILED, 'Post not found');
+  const membership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId: post.groupId, userId: viewerId } },
+    select: { groupId: true },
+  });
+  if (!membership) throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member');
+  if (post.status === 'active') throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'Votes are hidden until reveal');
+  return prisma.yesNoVote.findMany({ where: { postId }, orderBy: { createdAt: 'asc' } });
+}
+
+export async function listRatings(viewerId: string, postId: string) {
+  const post = await prisma.post.findUnique({ where: { id: postId }, select: { groupId: true, status: true } });
+  if (!post) throw new AppError(404, ErrorCode.VALIDATION_FAILED, 'Post not found');
+  const membership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId: post.groupId, userId: viewerId } },
+    select: { groupId: true },
+  });
+  if (!membership) throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member');
+  if (post.status === 'active') throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'Ratings are hidden until reveal');
+  return prisma.rating.findMany({ where: { postId }, orderBy: { createdAt: 'asc' } });
 }

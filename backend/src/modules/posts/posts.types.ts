@@ -38,6 +38,8 @@ export type PostDetail = {
   groupName: string;
   caption: string;
   status: string;
+  allowedInteractions: string[];
+  ratingScale: number | null;
   createdAt: Date;
   updatedAt: Date;
   media: PostMediaItem[];
@@ -46,6 +48,8 @@ export type PostDetail = {
   reactionCount: number;
   commentCount: number;
   viewerReaction: string | null;
+  viewerYesNoVote: string | null;
+  viewerRating: number | null;
 };
 
 /**
@@ -61,6 +65,8 @@ export type PostSummary = {
   groupName: string;
   caption: string;
   status: string;
+  allowedInteractions: string[];
+  ratingScale: number | null;
   createdAt: Date;
   media: PostMediaItem[];
   discussionMeta: PostDiscussionMeta | null;
@@ -99,6 +105,8 @@ export type CreatePostInput = {
   mediaIds: string[];
   timerMinutes: number;
   groupName?: string;
+  allowedInteractions?: string[];
+  ratingScale?: number | null;
 };
 
 export type CreatePostResult = {
@@ -107,6 +115,8 @@ export type CreatePostResult = {
   groupId: string;
   caption: string;
   status: string;
+  allowedInteractions: string[];
+  ratingScale: number | null;
   createdAt: Date;
   updatedAt: Date;
   media: PostMediaItem[];
@@ -156,3 +166,39 @@ export type CreateCommentInput = {
 };
 
 export type ListCommentsResult = CommentItem[];
+
+// --- YesNo / Rating / Reactions -------------------------------------------
+
+export type YesNoVoteItem = {
+  postId: string;
+  userId: string;
+  value: 'yes' | 'no';
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type RatingItem = {
+  postId: string;
+  userId: string;
+  value: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type VoteInput = {
+  viewerId: string;
+  postId: string;
+  value: 'yes' | 'no';
+};
+
+export type RatingInput = {
+  viewerId: string;
+  postId: string;
+  value: number;
+};
+
+export type ReactionInput = {
+  viewerId: string;
+  postId: string;
+  type: string; // single emoji
+};

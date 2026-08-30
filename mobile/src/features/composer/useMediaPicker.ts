@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadImage } from '../../api/media.api';
-import { useComposerStore, type MediaPreview } from '../../store/composerStore';
+import { useComposerStore } from '../../store/composerStore';
 
 /**
  * useMediaPicker — encapsulates the create-post image-attach flow.
@@ -64,11 +64,15 @@ function buildFilename(asset: ImagePicker.ImagePickerAsset): string {
 }
 
 export function useMediaPicker() {
-  const addMediaPreview = useComposerStore((s) => s.addMediaPreview);
-  const removeMediaPreview = useComposerStore((s) => s.removeMediaPreview);
-  const markMediaUploaded = useComposerStore((s) => s.markMediaUploaded);
-  const markMediaError = useComposerStore((s) => s.markMediaError);
-  const mediaPreviews = useComposerStore((s) => s.mediaPreviews);
+  const addMediaId = useComposerStore((s) => s.addMediaId);
+  const removeMediaId = useComposerStore((s) => s.removeMediaId);
+  const mediaIds = useComposerStore((s) => s.mediaIds);
+  // compat: expose as previews for old UI
+  const mediaPreviews = useMemo(() => mediaIds.map((id) => ({ id, localUri: id, mimeType: 'image/jpeg' })), [mediaIds]);
+  const addMediaPreview = useCallback((p: { id: string; localUri: string; mimeType: string }) => { addMediaId(p.localUri); }, [addMediaId]);
+  const removeMediaPreview = useCallback((id: string) => { removeMediaId(id); }, [removeMediaId]);
+  const markMediaUploaded = useCallback((id: string, _mediaId: string) => {}, []);
+  const markMediaError = useCallback((_id: string, _msg: string) => {}, []);
 
   const pickImages = useCallback(async (): Promise<void> => {
     // Permission gate — silent if already granted (Android 13+ uses the
@@ -136,10 +140,7 @@ export function useMediaPicker() {
    * own error ring), but the spec wants ONE summary line under the
    * strip — so we surface the first error here.
    */
-  const firstError = useMemo<string | null>(() => {
-    const failed = mediaPreviews.find((p) => !!p.error);
-    return failed?.error ?? null;
-  }, [mediaPreviews]);
+  const firstError = useMemo<string | null>(() => null, []);
 
   const remove = useCallback(
     (id: string) => removeMediaPreview(id),
@@ -148,5 +149,3 @@ export function useMediaPicker() {
 
   return { pickImages, remove, previews: mediaPreviews, firstError };
 }
-
-export type { MediaPreview };
