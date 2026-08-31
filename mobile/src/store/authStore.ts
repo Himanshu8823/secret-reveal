@@ -15,7 +15,12 @@ type AuthState = {
   user: AuthUser | null;
   isNewUser: boolean;
   setSession: (input: {
-    accessToken: string;
+    /**
+     * Null is legal: a cold start with no network restores the user from
+     * secure storage without a fresh access token. The axios interceptor
+     * mints one on the first call once the server is reachable again.
+     */
+    accessToken: string | null;
     user: AuthUser;
     isNewUser: boolean;
   }) => void;

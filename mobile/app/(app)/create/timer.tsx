@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Button, Text, useDialog } from '../../../src/components/ui';
 import { colors } from '../../../src/theme';
 import { useComposerStore } from '../../../src/store/composerStore';
+import { useDiscardComposer } from '../../../src/features/composer/useDiscardComposer';
 
 type PresetKey = '30m' | '1h' | '3h' | 'custom';
 
@@ -36,6 +37,7 @@ export default function CreateTimerScreen() {
   const stored = useComposerStore((s) => s.timerMinutes);
   const setTimer = useComposerStore((s) => s.setTimer);
   const dialog = useDialog();
+  const { confirmDiscard } = useDiscardComposer();
 
   // Initial selection derives from the store when we revisit the screen.
   const initialKey: PresetKey =
@@ -74,7 +76,7 @@ export default function CreateTimerScreen() {
   };
 
   const onBack = () => router.back();
-  const onClose = () => router.replace('/(app)');
+  const onClose = confirmDiscard;
 
   return (
     <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>

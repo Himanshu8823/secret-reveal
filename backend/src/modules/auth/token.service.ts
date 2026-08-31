@@ -206,7 +206,17 @@ export async function rotateRefresh(
     return {
       accessToken,
       refreshToken: newRefreshToken,
-      user: { id: user.id, phone: user.phone, name: user.name },
+      // Must mirror verifyOtp's user shape exactly — the client persists
+      // this blob over the stored one on every cold start, so dropping
+      // fields here silently wipes username/avatar/bio on the device.
+      user: {
+        id: user.id,
+        phone: user.phone,
+        name: user.name,
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+        bio: user.bio,
+      },
     };
   });
 }

@@ -56,10 +56,11 @@ export default function RootIndex() {
     case 'loading':
       return null; // Brief blank moment — boot is sub-second on warm network.
     case 'authenticated': {
-      // The store is already populated by bootstrapAuth. We still need the
-      // auth-aware redirect.
-      const accessToken = useAuthStore.getState().accessToken;
-      return accessToken ? <Redirect href="/(app)" /> : <Redirect href="/(auth)/login" />;
+      // Check the user, not the access token: an offline cold start
+      // deliberately restores the session with a null token (see boot.ts),
+      // and gating on the token here would send it back to login.
+      const user = useAuthStore.getState().user;
+      return user ? <Redirect href="/(app)" /> : <Redirect href="/(auth)/login" />;
     }
     case 'unauthenticated':
       return <Redirect href="/(auth)/login" />;

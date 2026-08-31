@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { requestOtp, verifyOtp } from '../../../api/auth.api';
-import { setRefreshToken } from '../../../utils/secureStorage';
+import { setRefreshToken, setStoredUser } from '../../../utils/secureStorage';
 import { useAuthStore } from '../../../store/authStore';
 import type { AuthUser } from '../types';
 
@@ -33,9 +33,13 @@ export function useAuth() {
   const confirmOtp = useCallback(
     async (input: VerifyOtpInput) => {
       const result = await verifyOtp(input);
-      // Refresh token is the only thing we persist (per CLAUDE.md).
-      await setRefreshToken(result.refreshToken);
       const user: AuthUser = result.user;
+      // Persist BOTH the refresh token and the user. The user blob is what
+      // lets a cold start show a signed-in shell while /auth/refresh is
+      // still in flight; without it, a returning user who skips the
+      // welcome screen (name already set) had a token but no cached user.
+      await setRefreshToken(result.refreshToken);
+      await setStoredUser(user);
       setSession({ accessToken: result.accessToken, user, isNewUser: result.isNewUser });
       return result;
     },

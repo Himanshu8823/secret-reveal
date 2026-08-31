@@ -2,7 +2,7 @@ import { Text as RNText, type TextProps as RNTextProps, type TextStyle } from 'r
 import { typography, type TypographyToken } from '@/theme';
 
 export type TextVariant = TypographyToken;
-export type TextTone = 'primary' | 'secondary' | 'tertiary' | 'onDark' | 'link' | 'danger' | 'success' | 'inherit';
+export type TextTone = 'primary' | 'secondary' | 'tertiary' | 'onDark' | 'link' | 'danger' | 'success' | 'warning' | 'info' | 'inherit';
 
 export interface TextProps extends Omit<RNTextProps, 'style'> {
   /** Typography token. Defaults to `body`. */
@@ -24,6 +24,8 @@ const toneClass: Record<TextTone, string> = {
   link: 'text-text-link',
   danger: 'text-danger',
   success: 'text-success',
+  warning: 'text-warning',
+  info: 'text-info',
   inherit: '',
 };
 

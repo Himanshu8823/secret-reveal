@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import { useAuthStore } from '../store/authStore';
-import { getRefreshToken, setRefreshToken, clearRefreshToken } from '../utils/secureStorage';
+import { getRefreshToken, setRefreshToken, clearAllAuthData } from '../utils/secureStorage';
 import { refresh } from './auth.api';
 
 /**
@@ -58,7 +58,10 @@ async function tryRefresh(): Promise<string | null> {
         code === 'TOKEN_EXPIRED' ||
         code === 'UNAUTHENTICATED';
       if (isAuth) {
-        await clearRefreshToken();
+        // Clear the user blob alongside the token — leaving a stored user
+        // behind with no token is the orphan state boot.ts has to special
+        // case, and it makes the next cold start ambiguous.
+        await clearAllAuthData();
         const signOut = useAuthStore.getState().signOut;
         if (signOut) {
           signOut();
@@ -105,15 +108,34 @@ export async function unwrap<T>(p: Promise<{ data: import('../features/auth/type
     return data.data;
   } catch (e) {
     if (axios.isAxiosError(e)) {
+      // Preserve the HTTP status and a network-vs-server distinction on the
+      // re-thrown error. Callers (notably boot.ts's isAuthError) branch on
+      // these; dropping them made "server unreachable" indistinguishable
+      // from "token rejected", which silently signed users out on any
+      // transient network failure.
+      const status = e.response?.status;
+      const isNetworkError = !e.response;
       const data = e.response?.data as
         | { success?: false; error?: { code: string; message: string } }
         | undefined;
       if (data?.error) {
-        const err = new Error(data.error.message) as Error & { code?: string };
+        const err = new Error(data.error.message) as Error & {
+          code?: string;
+          status?: number;
+          isNetworkError?: boolean;
+        };
         err.code = data.error.code;
+        err.status = status;
+        err.isNetworkError = false;
         throw err;
       }
-      throw new Error(e.message);
+      const err = new Error(e.message) as Error & {
+        status?: number;
+        isNetworkError?: boolean;
+      };
+      err.status = status;
+      err.isNetworkError = isNetworkError;
+      throw err;
     }
     throw e;
   }

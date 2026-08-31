@@ -27,6 +27,13 @@ export const s3 =
   new S3Client({
     region: env.S3_REGION,
     endpoint: env.S3_ENDPOINT, // Supabase: https://<ref>.supabase.co/storage/v1/s3 | AWS: undefined
+    // Path-style ({endpoint}/{bucket}/{key}) instead of the SDK's default
+    // virtual-hosted style ({bucket}.{endpoint}/{key}). Supabase Storage
+    // only serves path-style: the bucket-as-subdomain host isn't covered by
+    // their wildcard TLS cert, so the default fails the handshake with
+    // "SSL alert number 40" before any request is sent. Only forced when a
+    // custom endpoint is set — real AWS S3 keeps its default behaviour.
+    forcePathStyle: Boolean(env.S3_ENDPOINT),
     credentials:
       env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY
         ? {

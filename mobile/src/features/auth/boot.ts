@@ -68,6 +68,24 @@ export async function bootstrapAuth(): Promise<AuthBootState> {
       await clearStoredUser();
       return { state: 'unauthenticated' };
     }
+
+    // Not an auth rejection — the server was unreachable, slow, or 5xx'd.
+    // The refresh token is still valid, so the user must NOT be bounced to
+    // login. If we have a cached user we restore the session shell with a
+    // null access token; the axios 401-interceptor mints a real one on the
+    // first call once connectivity is back.
+    const cachedUser = await getStoredUser();
+    if (cachedUser) {
+      useAuthStore.getState().setSession({
+        accessToken: null,
+        user: cachedUser,
+        isNewUser: false,
+      });
+      return { state: 'authenticated' };
+    }
+
+    // No cached user to fall back on — show the offline screen with retry
+    // rather than login, so the persisted token still gets its chance.
     return { state: 'offline', error: e };
   }
 }
@@ -83,7 +101,13 @@ function isAuthError(e: unknown): boolean {
     code?: string;
     response?: { status?: number; data?: { error?: { code?: string } } };
     status?: number;
+    isNetworkError?: boolean;
   };
+
+  // Server never answered (DNS/timeout/refused). Nothing was rejected, so
+  // the token stays — this is the case that was silently signing users out.
+  if (err.isNetworkError) return false;
+
   const status = err.response?.status ?? err.status;
   const errorCode = err.response?.data?.error?.code ?? err.code;
 

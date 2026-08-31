@@ -31,19 +31,19 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 9999,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.brand.primary,
     marginRight: 12,
   },
   lines: { flex: 1 },
   title: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.textPrimary,
+    color: colors.text.primary,
     marginBottom: 2,
   },
   subtitle: {
     fontSize: 13,
     fontWeight: '400',
-    color: colors.textSecondary,
+    color: colors.text.secondary,
   },
 });

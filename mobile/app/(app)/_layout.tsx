@@ -1,7 +1,8 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { colors, spacing } from '../../src/theme';
+import { useAuthStore } from '../../src/store/authStore';
 import { useRealtimeNotifications } from '../../src/hooks/useRealtimeNotifications';
 import { usePushRegistration } from '../../src/hooks/usePushRegistration';
 import { useRefreshOnFocus } from '../../src/hooks/useRefreshOnFocus';
@@ -21,6 +22,9 @@ import { getUnreadNotificationCount } from '../../src/api/notifications.api';
  * connection and one push-registration flow for the whole session.
  */
 export default function AppLayout() {
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const user = useAuthStore((s) => s.user);
+
   useRealtimeNotifications();
   usePushRegistration();
 
@@ -29,9 +33,21 @@ export default function AppLayout() {
     queryFn: () => getUnreadNotificationCount(),
     staleTime: 30_000,
     refetchOnWindowFocus: true,
+    // Don't fire authenticated requests once the session is gone —
+    // otherwise sign-out leaves a 401-ing query running behind the
+    // redirect below.
+    enabled: Boolean(accessToken),
   });
   useRefreshOnFocus(['notifications', 'unread-count']);
   const unreadCount = unreadQuery.data?.count ?? 0;
+
+  // Guard the authenticated shell on the USER, not the access token: a
+  // cold start with no network restores the user from secure storage with
+  // a null token on purpose (see boot.ts). Gating on the token would bounce
+  // that perfectly valid session straight back to login.
+  if (!user) {
+    return <Redirect href="/(auth)/login" />;
+  }
 
   return (
     <Tabs

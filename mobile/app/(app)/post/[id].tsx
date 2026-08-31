@@ -17,6 +17,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, radius, elevation } from '../../../src/theme';
 import { avatarColorFor } from '../../../src/utils/avatarColor';
 import { Text, Pill } from '../../../src/components/ui';
+import { ImageViewer } from '../../../src/components/ImageViewer';
 import { useRefreshOnFocus } from '../../../src/hooks/useRefreshOnFocus';
 import {
   createComment as createCommentApi,
@@ -88,10 +89,17 @@ export default function HiddenDiscussionScreen() {
     placeholderData: (prev) => prev,
   });
 
+  const commentsEnabled = (postQuery.data?.allowedInteractions ?? []).includes('textComment');
+  // The server hides comment bodies until reveal (403 while status is
+  // 'active'). Asking anyway just produced a 403 on every focus/refetch,
+  // so only fetch once the post is actually revealed.
+  const commentsReadable = commentsEnabled && postQuery.data?.status === 'revealed';
+
   const commentsQuery = useQuery({
     queryKey: ['post', postId, 'comments'],
     queryFn: () => listComments(postId),
-    enabled: Boolean(postId),
+    enabled: Boolean(postId) && commentsReadable,
+    retry: false,
     staleTime: 30_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
@@ -188,6 +196,21 @@ export default function HiddenDiscussionScreen() {
 
   const yesNoMutation = useMutation({
     mutationFn: (value: 'yes' | 'no') => voteYesNo(postId, value),
+    // Paint the choice immediately; the server catches up behind it.
+    onMutate: async (value: 'yes' | 'no') => {
+      await queryClient.cancelQueries({ queryKey: ['post', postId] });
+      const previous = queryClient.getQueryData<PostDetail>(['post', postId]);
+      if (previous) {
+        queryClient.setQueryData<PostDetail>(['post', postId], {
+          ...previous,
+          viewerYesNoVote: value,
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(['post', postId], context.previous);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
     },
@@ -195,6 +218,22 @@ export default function HiddenDiscussionScreen() {
 
   const ratingMutation = useMutation({
     mutationFn: (value: number) => ratePost(postId, value),
+    // Stars fill on tap, not on response — waiting on the round-trip made
+    // the control feel broken.
+    onMutate: async (value: number) => {
+      await queryClient.cancelQueries({ queryKey: ['post', postId] });
+      const previous = queryClient.getQueryData<PostDetail>(['post', postId]);
+      if (previous) {
+        queryClient.setQueryData<PostDetail>(['post', postId], {
+          ...previous,
+          viewerRating: value,
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) queryClient.setQueryData(['post', postId], context.previous);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
     },
@@ -213,6 +252,7 @@ export default function HiddenDiscussionScreen() {
   });
 
   const [commentDraft, setCommentDraft] = useState('');
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
 
   const isInitialLoad = postQuery.isLoading && !postQuery.data;
 
@@ -251,7 +291,7 @@ export default function HiddenDiscussionScreen() {
               </View>
             ) : post ? (
               <>
-                <PostHeader post={post} countdownText={countdownText} />
+                <PostHeader post={post} countdownText={countdownText} onPressImage={setViewerUri} />
                 <EngagementBar
                   post={post}
                   onLike={() => likeMutation.mutate()}
@@ -290,22 +330,33 @@ export default function HiddenDiscussionScreen() {
                   )}
                 </ThreadSection>
 
-                <ThreadSection title="Comments">
-                  {commentsQuery.isLoading ? (
-                    <View className="py-3 items-center">
-                      <ActivityIndicator color={colors.brand.primary} />
-                    </View>
-                  ) : (commentsQuery.data ?? []).length === 0 ? (
-                    <Text variant="caption" tone="tertiary" className="mb-2">
-                      No comments yet — meta-discussion only, never anonymous.
-                    </Text>
-                  ) : (
-                    (commentsQuery.data ?? []).map((c: CommentItem) => (
-                      <ThreadRow key={c.id} name={c.authorName ?? 'Unknown'} body={c.body} createdAt={c.createdAt} />
-                    ))
-                  )}
+                {/* Comments only exist when the author enabled them at
+                    creation — otherwise the whole section stays off. */}
+                {(post.allowedInteractions ?? []).includes('textComment') ? (
+                  <ThreadSection
+                    title="Comments"
+                    statusPill={
+                      post.status === 'active' ? <Pill label="Hidden until reveal" tone="info" /> : undefined
+                    }
+                  >
+                    {post.status === 'active' ? (
+                      <Text variant="caption" tone="tertiary" className="mb-2">
+                        Comments stay hidden until the timer ends. You can still add yours.
+                      </Text>
+                    ) : commentsQuery.isLoading ? (
+                      <View className="py-3 items-center">
+                        <ActivityIndicator color={colors.brand.primary} />
+                      </View>
+                    ) : (commentsQuery.data ?? []).length === 0 ? (
+                      <Text variant="caption" tone="tertiary" className="mb-2">
+                        No comments yet — meta-discussion only, never anonymous.
+                      </Text>
+                    ) : (
+                      (commentsQuery.data ?? []).map((c: CommentItem) => (
+                        <ThreadRow key={c.id} name={c.authorName ?? 'Unknown'} body={c.body} createdAt={c.createdAt} />
+                      ))
+                    )}
 
-                  {(post.allowedInteractions ?? []).includes('textComment') ? (
                     <ReplyComposer
                       value={commentDraft}
                       onChangeText={setCommentDraft}
@@ -320,18 +371,28 @@ export default function HiddenDiscussionScreen() {
                         commentMutation.mutate(trimmed, { onSuccess: () => setCommentDraft('') });
                       }}
                     />
-                  ) : null}
-                </ThreadSection>
+                  </ThreadSection>
+                ) : null}
               </>
             ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      <ImageViewer visible={viewerUri != null} uri={viewerUri} onClose={() => setViewerUri(null)} />
     </View>
   );
 }
 
-function PostHeader({ post, countdownText }: { post: PostDetail; countdownText: string }) {
+function PostHeader({
+  post,
+  countdownText,
+  onPressImage,
+}: {
+  post: PostDetail;
+  countdownText: string;
+  onPressImage: (uri: string) => void;
+}) {
   const initials = authorInitials(post.authorName);
   const avatarColor = avatarColorFor(post.authorId);
   const firstMedia = post.media?.[0];
@@ -381,7 +442,7 @@ function PostHeader({ post, countdownText }: { post: PostDetail; countdownText: 
       </View>
 
       {/* Media (single full-width preview, 16:9) */}
-      {firstMedia ? <MediaPreview item={firstMedia} /> : null}
+      {firstMedia ? <MediaPreview item={firstMedia} onPressImage={onPressImage} /> : null}
     </View>
   );
 }
@@ -436,22 +497,34 @@ function EngagementBar({
       ) : null}
 
       {allowed.includes('rating') ? (
-        <View className="flex-row items-center flex-wrap gap-1">
+        // Real star-rating behaviour: tapping the Nth star fills 1..N,
+        // rather than highlighting only the exact number tapped.
+        <View className="flex-row items-center flex-wrap gap-0.5">
           {Array.from({ length: post.ratingScale ?? 5 }, (_, i) => i + 1).map((n) => {
-            const active = viewerRating === n;
+            const filled = viewerRating != null && n <= viewerRating;
             return (
               <Pressable
                 key={n}
                 onPress={() => onRate(n)}
                 accessibilityRole="button"
-                accessibilityLabel={`Rate ${n}`}
-                className="w-8 h-8 rounded-full border items-center justify-center"
-                style={{ backgroundColor: active ? colors.brand.primary : colors.surface.bg, borderColor: colors.brand.primary }}
+                accessibilityLabel={`Rate ${n} out of ${post.ratingScale ?? 5}`}
+                hitSlop={4}
+                className="items-center justify-center active:opacity-70"
+                style={{ padding: 2 }}
               >
-                <Text variant="caption" bold tone={active ? 'onDark' : 'primary'}>{n}</Text>
+                <Ionicons
+                  name={filled ? 'star' : 'star-outline'}
+                  size={22}
+                  color={filled ? colors.brand.accentAmber : colors.text.tertiary}
+                />
               </Pressable>
             );
           })}
+          {viewerRating != null ? (
+            <Text variant="caption" tone="secondary" className="ml-1.5">
+              {viewerRating}/{post.ratingScale ?? 5}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -680,29 +753,45 @@ function ReplyComposer({
   );
 }
 
-function MediaPreview({ item }: { item: PostMediaItem }) {
+function MediaPreview({ item, onPressImage }: { item: PostMediaItem; onPressImage: (uri: string) => void }) {
   const isImage = item.mimeType.startsWith('image/');
   return (
-    <View
-      accessibilityRole="image"
-      accessibilityLabel="Attached media"
+    <Pressable
+      onPress={isImage ? () => onPressImage(item.url) : undefined}
+      accessibilityRole={isImage ? 'button' : 'image'}
+      accessibilityLabel={isImage ? 'Open image full screen' : 'Attached media'}
       className="w-full aspect-[16/9] overflow-hidden mt-1 mb-1"
       style={{ backgroundColor: colors.surface.bg, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
     >
       {isImage ? (
+        // expo-image needs a real style for its dimensions — NativeWind's
+        // className doesn't reach it, so w-full/h-full collapsed the image
+        // to zero size and nothing rendered.
         <Image
           source={{ uri: item.url }}
-          className="w-full h-full"
+          style={{ width: '100%', height: '100%' }}
           contentFit="cover"
           cachePolicy="memory-disk"
           transition={200}
+          // Decode off the UI thread and hold a low-res placeholder until
+          // the full image lands, so scrolling stays smooth.
+          priority="normal"
+          recyclingKey={item.id}
         />
       ) : (
         <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.surface.bg }}>
-          <MaterialCommunityIcons name="play-circle-outline" size={36} color={colors.brand.primary} />
+          <MaterialCommunityIcons
+            name={
+              item.mimeType.startsWith('video/') ? 'play-circle-outline'
+              : item.mimeType.startsWith('audio/') ? 'music-note-outline'
+              : 'file-document-outline'
+            }
+            size={36}
+            color={colors.brand.primary}
+          />
         </View>
       )}
-    </View>
+    </Pressable>
   );
 }
 

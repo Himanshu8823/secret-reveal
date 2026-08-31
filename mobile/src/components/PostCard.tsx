@@ -1,4 +1,5 @@
-import { Pressable, View, Image } from 'react-native';
+import { Pressable, View } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { Text, Pill } from './ui';
 import { elevation, radius, colors } from '../theme';
@@ -89,10 +90,15 @@ export function PostCard({ post, onPress }: Props) {
 
       {/* First image (if any) */}
       {firstImageMedia ? (
+        // expo-image reads dimensions from `style`, not NativeWind's
+        // className, and uses `contentFit` rather than RN's `resizeMode`.
         <Image
           source={{ uri: firstImageMedia.url }}
-          className="w-full aspect-[16/9] rounded-md mb-3"
-          resizeMode="cover"
+          style={{ width: '100%', aspectRatio: 16 / 9, borderRadius: radius.md, marginBottom: 12 }}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={200}
+          recyclingKey={firstImageMedia.id}
         />
       ) : null}
 

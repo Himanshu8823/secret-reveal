@@ -10,6 +10,7 @@ import { useComposerStore } from '../../../src/store/composerStore';
 import { createPost } from '../../../src/api/posts.api';
 import { listUsers } from '../../../src/api/users.api';
 import { listMyGroups } from '../../../src/api/groups.api';
+import { useDiscardComposer } from '../../../src/features/composer/useDiscardComposer';
 
 const GROUP_NAME_MAX = 60;
 
@@ -17,7 +18,9 @@ export default function CreateGroupsScreen() {
   const queryClient = useQueryClient();
   const dialog = useDialog();
   const caption = useComposerStore((s) => s.caption);
-  const mediaIds = useComposerStore((s) => s.mediaIds);
+  const uploadedMediaIds = useComposerStore((s) => s.uploadedMediaIds);
+  const { confirmDiscard } = useDiscardComposer();
+  const hasPendingUploads = useComposerStore((s) => s.hasPendingUploads);
   const timerMinutes = useComposerStore((s) => s.timerMinutes);
   const interactionTypes = useComposerStore((s) => s.interactionTypes);
   const ratingScale = useComposerStore((s) => s.ratingScale);
@@ -61,7 +64,7 @@ export default function CreateGroupsScreen() {
   const canPublish = activeTab === 'create' ? canPublishCreate : canPublishExisting;
 
   const onBack = () => router.back();
-  const onClose = () => router.replace('/(app)');
+  const onClose = confirmDiscard;
 
   const publishCreate = async () => {
     if (!canPublishCreate) {
@@ -72,13 +75,18 @@ export default function CreateGroupsScreen() {
       dialog.show({ variant: 'warning', title: 'Pick a timer', message: 'Go back and choose timer', actions: [{ label: 'OK' }] });
       return;
     }
+    if (hasPendingUploads()) {
+      dialog.show({ variant: 'warning', title: 'Attachments uploading', message: 'Wait for the uploads to finish, then publish.', actions: [{ label: 'OK' }] });
+      return;
+    }
     setSubmitting(true);
     try {
       const memberIds = invitees.map((i) => i.id);
       await createPost({
         memberIds,
         caption,
-        mediaIds,
+        // Only server-issued ids — never the local file:// uri.
+        mediaIds: uploadedMediaIds(),
         timerMinutes,
         groupName: localGroupName.trim(),
         allowedInteractions: interactionTypes.length ? interactionTypes : ['textComment'],
@@ -105,12 +113,17 @@ export default function CreateGroupsScreen() {
       return;
     }
     if (timerMinutes === null) return;
+    if (hasPendingUploads()) {
+      dialog.show({ variant: 'warning', title: 'Attachments uploading', message: 'Wait for the uploads to finish, then publish.', actions: [{ label: 'OK' }] });
+      return;
+    }
     setSubmitting(true);
     try {
       await createPost({
         groupId: selectedExistingGroupId,
         caption,
-        mediaIds,
+        // Only server-issued ids — never the local file:// uri.
+        mediaIds: uploadedMediaIds(),
         timerMinutes,
         allowedInteractions: interactionTypes.length ? interactionTypes : ['textComment'],
         ratingScale: ratingScale ?? null,

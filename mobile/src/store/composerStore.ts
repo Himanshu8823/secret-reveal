@@ -16,9 +16,27 @@ export function validateInteractions(types: InteractionType[]): string | null {
   return null;
 }
 
+export type MediaKind = 'image' | 'video' | 'audio' | 'pdf';
+
+/**
+ * One picked attachment. `localUri` is what the picker handed us (used for
+ * the thumbnail); `mediaId` is the server-side id that only exists once the
+ * upload succeeds. ONLY `mediaId` may be sent to the API — posting a
+ * `file://` path is what the backend rejects with a 400.
+ */
+export type MediaAttachment = {
+  localId: string;
+  kind: MediaKind;
+  localUri: string;
+  mediaId: string | null;
+  url: string | null;
+  status: 'uploading' | 'uploaded' | 'error';
+  errorMessage?: string;
+};
+
 type ComposerState = {
   caption: string;
-  mediaIds: string[];
+  attachments: MediaAttachment[];
   interactionTypes: InteractionType[];
   ratingScale: 5 | 10 | null;
   timerMinutes: number | null;
@@ -27,9 +45,12 @@ type ComposerState = {
   selectedExistingGroupId: string | null;
 
   setCaption: (v: string) => void;
-  setMediaIds: (ids: string[]) => void;
-  addMediaId: (id: string) => boolean;
-  removeMediaId: (id: string) => void;
+  addAttachment: (a: MediaAttachment) => boolean;
+  updateAttachment: (localId: string, patch: Partial<MediaAttachment>) => void;
+  removeAttachment: (localId: string) => void;
+  /** Server ids of successfully uploaded files — the only safe thing to POST. */
+  uploadedMediaIds: () => string[];
+  hasPendingUploads: () => boolean;
   toggleInteraction: (t: InteractionType) => void;
   setRatingScale: (s: 5 | 10) => void;
   setTimer: (m: number) => void;
@@ -45,7 +66,7 @@ type ComposerState = {
 
 const initial = {
   caption: '',
-  mediaIds: [] as string[],
+  attachments: [] as MediaAttachment[],
   interactionTypes: [] as InteractionType[],
   ratingScale: null as 5 | 10 | null,
   timerMinutes: null as number | null,
@@ -57,15 +78,23 @@ const initial = {
 export const useComposerStore = create<ComposerState>((set, get) => ({
   ...initial,
   setCaption: (v) => set({ caption: v }),
-  setMediaIds: (ids) => set({ mediaIds: ids.slice(0, 5) }),
-  addMediaId: (id) => {
-    const cur = get().mediaIds;
+  addAttachment: (a) => {
+    const cur = get().attachments;
     if (cur.length >= 5) return false;
-    if (cur.includes(id)) return false;
-    set({ mediaIds: [...cur, id] });
+    set({ attachments: [...cur, a] });
     return true;
   },
-  removeMediaId: (id) => set((s) => ({ mediaIds: s.mediaIds.filter((m) => m !== id) })),
+  updateAttachment: (localId, patch) =>
+    set((s) => ({
+      attachments: s.attachments.map((a) => (a.localId === localId ? { ...a, ...patch } : a)),
+    })),
+  removeAttachment: (localId) =>
+    set((s) => ({ attachments: s.attachments.filter((a) => a.localId !== localId) })),
+  uploadedMediaIds: () =>
+    get()
+      .attachments.filter((a) => a.status === 'uploaded' && a.mediaId)
+      .map((a) => a.mediaId as string),
+  hasPendingUploads: () => get().attachments.some((a) => a.status === 'uploading'),
   toggleInteraction: (t) =>
     set((s) => {
       const has = s.interactionTypes.includes(t);

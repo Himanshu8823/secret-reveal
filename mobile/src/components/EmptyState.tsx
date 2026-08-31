@@ -16,7 +16,7 @@ export function EmptyState({ iconName = 'account-group-outline', title, subtitle
   return (
     <View style={styles.wrap}>
       <View style={styles.iconWrap}>
-        <MaterialCommunityIcons name={iconName as never} size={48} color={colors.textSecondary} />
+        <MaterialCommunityIcons name={iconName as never} size={48} color={colors.text.secondary} />
       </View>
       <Text style={styles.title}>{title}</Text>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
@@ -43,14 +43,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: colors.text.primary,
     textAlign: 'center',
     marginBottom: 6,
   },
   subtitle: {
     fontSize: 14,
     fontWeight: '400',
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     textAlign: 'center',
     maxWidth: 280,
   },

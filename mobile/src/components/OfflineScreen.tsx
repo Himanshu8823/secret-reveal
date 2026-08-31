@@ -23,7 +23,7 @@ export function OfflineScreen({ onRetry, retrying = false, errorMessage }: Props
           <MaterialCommunityIcons
             name="cloud-off-outline"
             size={56}
-            color={colors.textSecondary}
+            color={colors.text.secondary}
           />
         </View>
 
@@ -80,14 +80,14 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     letterSpacing: -0.2,
-    color: colors.textPrimary,
+    color: colors.text.primary,
     textAlign: 'center',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 15,
     fontWeight: '400',
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 22,
     maxWidth: 320,
@@ -95,7 +95,7 @@ const styles = StyleSheet.create({
   detail: {
     fontSize: 12,
     fontWeight: '400',
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     textAlign: 'center',
     marginTop: 16,
     paddingHorizontal: 24,
