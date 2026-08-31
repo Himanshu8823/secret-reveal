@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { View, FlatList, RefreshControl, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -90,9 +90,18 @@ export default function GroupDetailScreen() {
     });
   };
 
-  const onRefresh = useCallback(() => {
-    groupQuery.refetch();
-    postsQuery.refetch();
+  // Pull-to-refresh must only spin for a refresh the user actually
+  // triggered — wiring RefreshControl directly to isFetching also spins
+  // it for every silent focus-refetch (refetchOnWindowFocus +
+  // useRefreshOnFocus fire whenever this screen regains focus).
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setManualRefreshing(true);
+    try {
+      await Promise.all([groupQuery.refetch(), postsQuery.refetch()]);
+    } finally {
+      setManualRefreshing(false);
+    }
   }, [groupQuery, postsQuery]);
 
   const group = groupQuery.data;
@@ -177,10 +186,7 @@ export default function GroupDetailScreen() {
         }
         refreshControl={
           <RefreshControl
-            refreshing={
-              (groupQuery.isFetching && !groupQuery.isLoading) ||
-              (postsQuery.isFetching && !postsQuery.isLoading)
-            }
+            refreshing={manualRefreshing}
             onRefresh={onRefresh}
             tintColor={colors.brand.primary}
           />

@@ -12,14 +12,18 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid()) @db.Uuid
-  phone     String   @unique
-  name      String?
-  username  String?  @unique
-  avatarUrl String?  @db.VarChar(512)
-  bio       String?  @db.VarChar(160)
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt    @db.Timestamptz(6)
+  id            String   @id @default(uuid()) @db.Uuid
+  phone         String   @unique
+  name          String?
+  username      String?  @unique
+  avatarUrl     String?  @db.VarChar(512)
+  bio           String?  @db.VarChar(160)
+  // Expo push token (e.g. "ExponentPushToken[...]"). Null until the device
+  // registers one; cleared on logout. One token per user — v1 doesn't
+  // support multi-device push.
+  expoPushToken String?  @db.VarChar(255)
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt    @db.Timestamptz(6)
 
   refreshTokens  RefreshToken[]
   memberships    GroupMember[]
@@ -32,6 +36,7 @@ model User {
   media          Media[]
   yesNoVotes     YesNoVote[]
   ratings        Rating[]
+  notifications  Notification[]
 
   @@map("users")
 }
@@ -259,6 +264,24 @@ model Rating {
   @@id([postId, userId])
   @@index([postId])
   @@map("ratings")
+}
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  type      String   @db.VarChar(30) // "invite" | "reveal" | "comment" | "response" | "invite_accepted"
+  title     String   @db.VarChar(140)
+  body      String   @db.VarChar(280)
+  postId    String?  @db.Uuid
+  groupId   String?  @db.Uuid
+  inviteId  String?  @db.Uuid
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt(sort: Desc)])
+  @@map("notifications")
 }
 
 model Comment {

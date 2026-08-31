@@ -1,6 +1,11 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useQuery } from '@tanstack/react-query';
 import { colors, spacing } from '../../src/theme';
+import { useRealtimeNotifications } from '../../src/hooks/useRealtimeNotifications';
+import { usePushRegistration } from '../../src/hooks/usePushRegistration';
+import { useRefreshOnFocus } from '../../src/hooks/useRefreshOnFocus';
+import { getUnreadNotificationCount } from '../../src/api/notifications.api';
 
 /**
  * App shell tab nav — Phase 3. Four tabs:
@@ -10,8 +15,24 @@ import { colors, spacing } from '../../src/theme';
  * button on the bottom-left of the menu (rendered by Home's Fab). Create
  * routes still live under /(app)/create/* for routing purposes, but they
  * are hidden from the tab bar.
+ *
+ * The two notification hooks are mounted here (not per-screen) because
+ * this layout is the root of the authenticated shell — one socket
+ * connection and one push-registration flow for the whole session.
  */
 export default function AppLayout() {
+  useRealtimeNotifications();
+  usePushRegistration();
+
+  const unreadQuery = useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: () => getUnreadNotificationCount(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  useRefreshOnFocus(['notifications', 'unread-count']);
+  const unreadCount = unreadQuery.data?.count ?? 0;
+
   return (
     <Tabs
       screenOptions={{
@@ -53,6 +74,7 @@ export default function AppLayout() {
         name="notifications"
         options={{
           title: 'Notifications',
+          tabBarBadge: unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="notifications-outline" size={size} color={color} />
           ),

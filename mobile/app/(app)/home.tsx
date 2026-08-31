@@ -1,5 +1,5 @@
-import { useCallback } from 'react';
-import { View, FlatList, RefreshControl, ActivityIndicator, Pressable } from 'react-native';
+import { useCallback, useState } from 'react';
+import { View, FlatList, RefreshControl, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -51,9 +51,19 @@ export default function HomeScreen() {
   useRefreshOnFocus(['groups', 'mine']);
   useRefreshOnFocus(['posts', 'feed']);
 
-  const onRefresh = useCallback(() => {
-    groupsQuery.refetch();
-    feedQuery.refetch();
+  // Pull-to-refresh must only spin for a refresh the user actually
+  // triggered. `feedQuery.isFetching`/`groupsQuery.isFetching` also go
+  // true for the silent 60s background poll and every focus-refetch —
+  // wiring RefreshControl to those directly made the spinner reappear
+  // on its own every minute even though nobody pulled anything.
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setManualRefreshing(true);
+    try {
+      await Promise.all([groupsQuery.refetch(), feedQuery.refetch()]);
+    } finally {
+      setManualRefreshing(false);
+    }
   }, [groupsQuery, feedQuery]);
 
   const isInitialGroupsLoad = groupsQuery.isLoading && !groupsQuery.data;
@@ -174,16 +184,9 @@ export default function HomeScreen() {
             </View>
           )
         }
-        ListFooterComponent={
-          groupsQuery.data?.nextCursor ? (
-            <View className="py-6 items-center">
-              <ActivityIndicator color={colors.brand.primary} />
-            </View>
-          ) : null
-        }
         refreshControl={
           <RefreshControl
-            refreshing={groupsQuery.isFetching || feedQuery.isFetching}
+            refreshing={manualRefreshing}
             onRefresh={onRefresh}
             tintColor={colors.brand.primary}
           />

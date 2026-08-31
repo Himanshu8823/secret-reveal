@@ -180,7 +180,7 @@ export default function CreateTimerScreen() {
             fullWidth
             disabled={!canContinue}
             onPress={onNext}
-            accessibilityLabel="Continue to invites"
+            accessibilityLabel="Continue to group selection"
           />
         </View>
       </KeyboardAvoidingView>

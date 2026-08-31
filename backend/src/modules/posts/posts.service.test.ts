@@ -48,6 +48,9 @@ vi.mock('../../config/redis.js', () => ({
     del: vi.fn(),
   },
 }));
+vi.mock('../notifications/notifications.service.js', () => ({
+  createNotification: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('../../config/env.js', () => ({
   env: {
     NODE_ENV: 'development',
@@ -995,10 +998,13 @@ describe('revealDuePosts', () => {
 
   it('flips every candidate post to revealed and sets revealedAt', async () => {
     mockPrisma.post.findMany.mockResolvedValue([
-      { id: 'post-1' },
-      { id: 'post-2' },
+      { id: 'post-1', groupId: 'group-1', caption: 'Caption 1' },
+      { id: 'post-2', groupId: 'group-1', caption: 'Caption 2' },
     ]);
     mockPrisma.post.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.groupMember.findMany.mockResolvedValue([
+      { groupId: 'group-1', userId: 'user-1' },
+    ]);
 
     const now = new Date('2026-01-01T01:00:00Z');
     const revealed = await revealDuePosts(now);
@@ -1013,7 +1019,9 @@ describe('revealDuePosts', () => {
   });
 
   it('skips posts that were already revealed by a concurrent sweep (idempotent)', async () => {
-    mockPrisma.post.findMany.mockResolvedValue([{ id: 'post-1' }]);
+    mockPrisma.post.findMany.mockResolvedValue([
+      { id: 'post-1', groupId: 'group-1', caption: 'Caption 1' },
+    ]);
     // updateMany returns count:0 — the row was flipped by a concurrent
     // sweeper. We must NOT update revealedAt in that case.
     mockPrisma.post.updateMany.mockResolvedValue({ count: 0 });

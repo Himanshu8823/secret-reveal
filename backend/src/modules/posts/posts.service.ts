@@ -3,6 +3,7 @@ import { AppError, ErrorCode } from '../../lib/AppError.js';
 import { cacheDel, cacheDelPattern, cacheGetOrSet } from '../../lib/cache.js';
 import { logger } from '../../lib/logger.js';
 import { findOrCreateGroupByMembers } from '../groups/groups.service.js';
+import { createNotification } from '../notifications/notifications.service.js';
 import type {
   CommentItem,
   CreateCommentInput,
@@ -362,7 +363,7 @@ export async function submitResponse(input: SubmitResponseInput): Promise<Respon
 
   const post = await prisma.post.findUnique({
     where: { id: postId },
-    select: { id: true, groupId: true },
+    select: { id: true, groupId: true, authorId: true },
   });
 
   if (!post) {
@@ -392,6 +393,19 @@ export async function submitResponse(input: SubmitResponseInput): Promise<Respon
     { responseId: created.id, postId, authorId: viewerId },
     'response submitted',
   );
+
+  // Notify the post author — generic, pre-reveal-safe text only. Never
+  // leak the response body or responder identity before reveal; the
+  // notification itself must respect the same hiding rule as the API.
+  if (post.authorId !== viewerId) {
+    void createNotification({
+      userId: post.authorId,
+      type: 'response',
+      title: 'New response',
+      body: 'Someone responded to your post.',
+      postId,
+    }).catch((err) => logger.error({ err, postId }, 'failed to create response notification'));
+  }
 
   return {
     id: created.id,
@@ -598,10 +612,10 @@ export async function listPosts(input: ListPostsInput): Promise<ListPostsResult>
 async function loadPostForCommentGate(
   viewerId: string,
   postId: string,
-): Promise<{ status: string; groupId: string }> {
+): Promise<{ status: string; groupId: string; authorId: string }> {
   const post = await prisma.post.findUnique({
     where: { id: postId },
-    select: { id: true, groupId: true, status: true },
+    select: { id: true, groupId: true, status: true, authorId: true },
   });
   if (!post) {
     throw new AppError(404, ErrorCode.VALIDATION_FAILED, 'Post not found');
@@ -613,7 +627,7 @@ async function loadPostForCommentGate(
   if (!membership) {
     throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member of this group');
   }
-  return { status: post.status, groupId: post.groupId };
+  return { status: post.status, groupId: post.groupId, authorId: post.authorId };
 }
 
 /**
@@ -663,7 +677,7 @@ export async function createComment(input: CreateCommentInput): Promise<CommentI
 
   // Gate on membership; we deliberately do NOT gate on status — comments
   // are writable during the discussion phase, only the list is gated.
-  await loadPostForCommentGate(viewerId, postId);
+  const gate = await loadPostForCommentGate(viewerId, postId);
 
   const created = await prisma.comment.create({
     data: { postId, authorId: viewerId, body },
@@ -674,6 +688,19 @@ export async function createComment(input: CreateCommentInput): Promise<CommentI
     { commentId: created.id, postId, authorId: viewerId },
     'comment created',
   );
+
+  // Notify the post author — generic, pre-reveal-safe text only. Same
+  // privacy posture as submitResponse: never leak the comment body or
+  // commenter identity before reveal.
+  if (gate.authorId !== viewerId) {
+    void createNotification({
+      userId: gate.authorId,
+      type: 'comment',
+      title: 'New comment',
+      body: 'Someone commented on your post.',
+      postId,
+    }).catch((err) => logger.error({ err, postId }, 'failed to create comment notification'));
+  }
 
   return {
     id: created.id,
@@ -709,17 +736,20 @@ export async function createComment(input: CreateCommentInput): Promise<CommentI
  */
 export async function revealDuePosts(now: Date = new Date()): Promise<string[]> {
   // Find candidates first — we want to log the count and hand the ids
-  // to whoever cares (currently the worker, soon the notifier).
+  // to whoever cares (currently the worker, soon the notifier). Pull
+  // groupId + caption here too so the per-post notification fan-out below
+  // doesn't need a second round trip per post.
   const candidates = await prisma.post.findMany({
     where: {
       status: 'active',
       discussionMeta: { revealEndsAt: { lte: now }, revealedAt: null },
     },
-    select: { id: true },
+    select: { id: true, groupId: true, caption: true },
   });
 
   const revealed: string[] = [];
-  for (const { id } of candidates) {
+  const revealedMeta = new Map<string, { groupId: string; caption: string }>();
+  for (const { id, groupId, caption } of candidates) {
     // Per-post atomic update. updateMany with the same WHERE keeps it
     // idempotent — a concurrent sweeper (e.g. another instance) that
     // already flipped the row just no-ops.
@@ -744,6 +774,7 @@ export async function revealDuePosts(now: Date = new Date()): Promise<string[]> 
 
     if (result) {
       revealed.push(id);
+      revealedMeta.set(id, { groupId, caption });
       // Invalidate the cached post-detail for every viewer of this post.
       // We don't know the viewer set here; the cache key includes the
       // viewer id so pattern-delete covers them all.
@@ -753,6 +784,40 @@ export async function revealDuePosts(now: Date = new Date()): Promise<string[]> 
 
   if (revealed.length > 0) {
     logger.info({ count: revealed.length, postIds: revealed }, 'posts revealed by timer');
+
+    // Notify every member of every affected group. One batched query for
+    // all revealed posts' groups (not per-post) to avoid N+1s, then a
+    // fan-out of best-effort createNotification calls. A notification
+    // failure here must never re-fail the reveal itself — the posts are
+    // already committed 'revealed' by this point.
+    const groupIds = [...new Set([...revealedMeta.values()].map((m) => m.groupId))];
+    const members = await prisma.groupMember.findMany({
+      where: { groupId: { in: groupIds } },
+      select: { groupId: true, userId: true },
+    });
+    const membersByGroup = new Map<string, string[]>();
+    for (const m of members) {
+      const list = membersByGroup.get(m.groupId) ?? [];
+      list.push(m.userId);
+      membersByGroup.set(m.groupId, list);
+    }
+
+    for (const postId of revealed) {
+      const meta = revealedMeta.get(postId);
+      if (!meta) continue;
+      const captionSnippet =
+        meta.caption.length > 200 ? `${meta.caption.slice(0, 200)}…` : meta.caption;
+      const recipients = membersByGroup.get(meta.groupId) ?? [];
+      for (const userId of recipients) {
+        void createNotification({
+          userId,
+          type: 'reveal',
+          title: 'Results are in',
+          body: captionSnippet,
+          postId,
+        }).catch((err) => logger.error({ err, postId, userId }, 'failed to create reveal notification'));
+      }
+    }
   }
 
   return revealed;

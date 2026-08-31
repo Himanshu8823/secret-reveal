@@ -6,6 +6,7 @@ import { authRouter } from './modules/auth/auth.routes.js';
 import { usersRouter } from './modules/users/users.routes.js';
 import { groupsRouter, invitesRouter } from './modules/groups/groups.routes.js';
 import { postsRouter } from './modules/posts/posts.routes.js';
+import { notificationsRouter } from './modules/notifications/notifications.routes.js';
 import { mediaRouter } from './modules/media/media.routes.js';
 import { healthRouter } from './modules/health/health.routes.js';
 import { errorHandler } from './middlewares/errorHandler.js';
@@ -96,6 +97,7 @@ export function buildApp() {
   app.use('/api/v1/groups', groupsRouter);
   app.use('/api/v1/invites', invitesRouter);
   app.use('/api/v1/posts', postsRouter);
+  app.use('/api/v1/notifications', notificationsRouter);
   app.use('/api/v1/media', mediaRouter);
 
   // Centralized error handling — must be last.

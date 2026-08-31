@@ -6,7 +6,6 @@ import type { ApiEnvelope } from '../features/auth/types';
  *   GET    /posts                       — list visible feed
  *   POST   /posts                       — create a post
  *   GET    /posts/:id                   — single post detail
- *   POST   /posts/:id/reveal            — manually trigger reveal
  *   POST   /posts/:id/reactions         — toggle a reaction
  *   POST   /posts/:id/comments          — add a comment
  *   GET    /posts/:id/responses         — list responses (anonymous mask)
@@ -178,14 +177,6 @@ export async function createPost(input: CreatePostInput): Promise<CreatedPost> {
 export { createGroup } from './groups.api';
 export type { CreateGroupInput } from './groups.api';
 
-// --- Reveal ---------------------------------------------------------------
-
-export async function revealPost(postId: string): Promise<PostDetail> {
-  return unwrap<PostDetail>(
-    apiClient.post<ApiEnvelope<PostDetail>>(`/posts/${postId}/reveal`, {}),
-  );
-}
-
 // --- Reactions ------------------------------------------------------------
 
 export type ToggleReactionInput = { type?: string };
@@ -251,6 +242,15 @@ export async function createComment(
 ): Promise<CommentItem> {
   return unwrap<CommentItem>(
     apiClient.post<ApiEnvelope<CommentItem>>(`/posts/${postId}/comments`, input),
+  );
+}
+
+export type ListCommentsResponse = CommentItem[];
+
+/** Comments are meta-discussion, never anonymous — visible pre-reveal unlike responses. */
+export async function listComments(postId: string): Promise<ListCommentsResponse> {
+  return unwrap<ListCommentsResponse>(
+    apiClient.get<ApiEnvelope<ListCommentsResponse>>(`/posts/${postId}/comments`),
   );
 }
 

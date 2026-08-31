@@ -99,6 +99,20 @@ export const groupLeaveLimiter = makeLimiter({
   durationSeconds: TEN_MIN,
 });
 
+// --- Notifications ------------------------------------------------------
+
+export const notificationsListLimiter = makeLimiter({
+  keyPrefix: 'rl:notifications:list:user',
+  points: 60,
+  durationSeconds: TEN_MIN,
+});
+
+export const pushTokenRegisterLimiter = makeLimiter({
+  keyPrefix: 'rl:notifications:pushtoken:user',
+  points: 10,
+  durationSeconds: TEN_MIN,
+});
+
 /**
  * Express middleware factory: consumes `points` from a limiter keyed by
  * `keyFn(req)`. Throws AppError(RATE_LIMITED) on breach, including retry-after.

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/db.js';
 import { AppError, ErrorCode } from '../../lib/AppError.js';
 import { logger } from '../../lib/logger.js';
+import { createNotification } from '../notifications/notifications.service.js';
 import type {
   FindOrCreateGroupByMembersInput,
   FindOrCreateGroupByMembersResult,
@@ -468,7 +469,7 @@ export async function sendInvites(input: {
 }): Promise<{ created: number }> {
   const { groupId, inviterId, phoneNumbers } = input;
 
-  const group = await prisma.group.findUnique({ where: { id: groupId }, select: { id: true } });
+  const group = await prisma.group.findUnique({ where: { id: groupId }, select: { id: true, name: true } });
   if (!group) throw new AppError(404, ErrorCode.NOT_FOUND, 'Group not found');
 
   const isMember = await prisma.groupMember.findUnique({
@@ -481,6 +482,9 @@ export async function sendInvites(input: {
     select: { id: true },
   });
 
+  const inviter = await prisma.user.findUnique({ where: { id: inviterId }, select: { name: true } });
+  const inviterLabel = inviter?.name ?? 'Someone';
+
   let created = 0;
   for (const u of users) {
     if (u.id === inviterId) continue;
@@ -492,10 +496,21 @@ export async function sendInvites(input: {
       where: { groupId_inviteeId: { groupId, inviteeId: u.id } },
     });
     if (existing) continue;
-    await prisma.groupInvite.create({
+    const invite = await prisma.groupInvite.create({
       data: { groupId, inviterId, inviteeId: u.id, status: 'pending' },
     });
     created++;
+
+    // Fire-and-forget: a notification bug must never block the invite
+    // flow itself, which has already succeeded by this point.
+    void createNotification({
+      userId: u.id,
+      type: 'invite',
+      title: 'New invite',
+      body: `${inviterLabel} invited you to ${group.name}`,
+      groupId,
+      inviteId: invite.id,
+    }).catch((err) => logger.error({ err, inviteId: invite.id }, 'failed to create invite notification'));
   }
   return { created };
 }
@@ -542,6 +557,16 @@ export async function acceptInvite(inviteId: string, userId: string): Promise<In
       data: { status: 'accepted' },
     });
   });
+
+  const accepter = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+  void createNotification({
+    userId: invite.inviterId,
+    type: 'invite_accepted',
+    title: 'Invite accepted',
+    body: `${accepter?.name ?? 'Someone'} joined ${invite.group.name}`,
+    groupId: invite.groupId,
+    inviteId: invite.id,
+  }).catch((err) => logger.error({ err, inviteId }, 'failed to create invite_accepted notification'));
 
   return {
     id: invite.id,

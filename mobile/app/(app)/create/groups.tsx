@@ -78,7 +78,7 @@ export default function CreateGroupsScreen() {
       await createPost({
         memberIds,
         caption,
-        mediaIds: [],
+        mediaIds,
         timerMinutes,
         groupName: localGroupName.trim(),
         allowedInteractions: interactionTypes.length ? interactionTypes : ['textComment'],
@@ -110,7 +110,7 @@ export default function CreateGroupsScreen() {
       await createPost({
         groupId: selectedExistingGroupId,
         caption,
-        mediaIds: [],
+        mediaIds,
         timerMinutes,
         allowedInteractions: interactionTypes.length ? interactionTypes : ['textComment'],
         ratingScale: ratingScale ?? null,

@@ -30,6 +30,14 @@ import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 export function useRefreshOnFocus<T extends QueryKey>(queryKey: T): void {
   const queryClient = useQueryClient();
   const firstTimeRef = useRef(true);
+  // Callers pass an inline array literal (e.g. `['group', groupId]`), which
+  // is a new reference every render. Serializing it to a string gives
+  // useCallback's dep array a stable primitive to compare, so the
+  // memoized callback (and the effect useFocusEffect derives from it)
+  // isn't recreated — and re-run — on every render while the screen stays
+  // focused. Without this, invalidateQueries fires each render, which
+  // triggers a refetch, a state update, a re-render, and repeats forever.
+  const queryKeyString = JSON.stringify(queryKey);
 
   useFocusEffect(
     useCallback(() => {
@@ -38,6 +46,7 @@ export function useRefreshOnFocus<T extends QueryKey>(queryKey: T): void {
         return;
       }
       void queryClient.invalidateQueries({ queryKey });
-    }, [queryClient, queryKey]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [queryClient, queryKeyString]),
   );
 }

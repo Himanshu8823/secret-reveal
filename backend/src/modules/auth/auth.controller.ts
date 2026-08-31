@@ -5,6 +5,7 @@ import { phoneInputSchema } from './phone.schema.js';
 import { rotateRefresh, revokeToken } from './token.service.js';
 import { verifyRefreshToken } from '../../lib/jwt.js';
 import { logger } from '../../lib/logger.js';
+import { unregisterPushToken } from '../notifications/notifications.service.js';
 
 /**
  * Thin controllers. Per CLAUDE.md, business logic lives in the service
@@ -93,9 +94,11 @@ export async function postLogout(req: Request, res: Response, _next: NextFunctio
     }
     const { refreshToken } = parsed.data;
     let jti: string | undefined;
+    let userId: string | undefined;
     try {
       const payload = verifyRefreshToken(refreshToken);
       jti = payload.jti;
+      userId = payload.sub;
     } catch {
       // Token is invalid or expired. Logout still returns 204 — the token
       // is unusable anyway, so there is nothing to revoke.
@@ -109,6 +112,15 @@ export async function postLogout(req: Request, res: Response, _next: NextFunctio
         // caller — see privacy posture above. Server-side log so we
         // can investigate without leaking details to the caller.
         logger.error({ err, jti }, 'logout: failed to revoke refresh token');
+      }
+    }
+    if (userId) {
+      // Best-effort: a stale push token just means one missed push later,
+      // never worth failing logout over.
+      try {
+        await unregisterPushToken(userId);
+      } catch (err) {
+        logger.error({ err, userId }, 'logout: failed to clear push token');
       }
     }
   } catch (err) {

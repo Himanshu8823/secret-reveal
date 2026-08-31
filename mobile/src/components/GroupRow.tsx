@@ -2,6 +2,7 @@ import { Pressable, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { GroupSummary } from '../api/groups.api';
 import { Text } from './ui';
+import { formatRelative } from '../utils/formatRelative';
 
 type Props = {
   group: GroupSummary;
@@ -111,20 +112,4 @@ function avatarPalette(name: string): [string, string, string] {
 function previewFor(group: GroupSummary): string {
   if (!group.latestPost) return `No posts yet · ${group.memberCount} member${group.memberCount === 1 ? '' : 's'}`;
   return 'Latest post preview';
-}
-
-/** Lightweight "2h ago" formatter — no extra utils dep yet. */
-function formatRelative(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return '';
-  const diff = Math.max(0, Date.now() - then);
-  const min = Math.floor(diff / 60_000);
-  if (min < 1) return 'now';
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d`;
-  const wk = Math.floor(day / 7);
-  return `${wk}w`;
 }

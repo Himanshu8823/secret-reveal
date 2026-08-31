@@ -9,66 +9,53 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors } from '../../../src/theme';
+import { colors, radius } from '../../../src/theme';
 import { Text, Pill } from '../../../src/components/ui';
 import { useRefreshOnFocus } from '../../../src/hooks/useRefreshOnFocus';
 import {
   createComment as createCommentApi,
   getPost,
+  listComments,
   listResponses,
   ratePost,
-  revealPost,
   submitResponse,
   toggleReaction,
   toggleReactionAny,
   voteYesNo,
+  type CommentItem,
   type PostDetail,
   type PostMediaItem,
-  type ReactionType,
-  type ResponseItem,
 } from '../../../src/api/posts.api';
 
 /**
- * Screen — Hidden Discussion (Phase 3a/4 v1+).
+ * Screen — Hidden Discussion, thread-style (Phase 4 redesign, plan §10).
  *
- * Sections (top → bottom):
- *   - Header: timer count + status badge
- *   - Post body: author, caption, first media
- *   - Reactions bar (like/love/laugh) — viewer-scoped toggle
- *   - Comments section (always visible) — meta-discussion; we render
- *     comments inline only when we have a creation flow available
- *     (creator mode is the composer below)
- *   - Responses section — anonymous until reveal, real names after
- *   - Composer at the bottom: response input + send + (for the author)
- *     a "Reveal now" button that calls POST /posts/:id/reveal
+ * Layout, top → bottom:
+ *   - Author row (avatar, name, relative time) + hidden/revealed status pill
+ *   - Caption
+ *   - Media (16:9, if any)
+ *   - Compact engagement bar — dynamic per `post.allowedInteractions`
+ *   - Thread list: Responses (reveal-gated) then Comments (always visible,
+ *     meta-discussion, never anonymous)
+ *   - Reply composer, pinned to the bottom of the scroll content
  *
- * The gradient hero background is preserved from Phase 4 v1 to keep
- * the timer-as-hero visual intact.
+ * Reveal is timer-only (server-side worker) — there is intentionally no
+ * manual reveal action anywhere in this screen.
  */
 
 const AVATAR_SIZE = 36;
+const THREAD_AVATAR_SIZE = 30;
 
-// Light palette — matches app's white theme (surface bg/muted, brand subtle)
-const HERO_TOP = colors.surface.bg;
-const HERO_MID = colors.surface.muted;
-const HERO_BOTTOM = colors.surface.bg;
-const HERO_OVERLAY = colors.surface.muted;
-const HERO_OVERLAY_STRONG = colors.brand.primarySubtle;
-const HERO_ICON_MUTED = colors.text.tertiary;
-const HERO_BORDER = colors.border.DEFAULT;
-const HERO_ERROR = colors.semantic.danger;
-
-const REACTIONS: { type: string; icon: string; label: string }[] = [
-  { type: 'like', icon: 'heart-outline', label: 'Like' },
-  { type: 'love', icon: 'heart', label: 'Love' },
-  { type: 'laugh', icon: 'happy-outline', label: 'Haha' },
-];
+const BORDER = colors.border.DEFAULT;
+const MUTED_BG = colors.surface.muted;
+const ICON_MUTED = colors.text.tertiary;
+const ERROR_COLOR = colors.semantic.danger;
+const SUBTLE_PILL_BG = colors.brand.primarySubtle;
 
 const EMOJI_PICKER = ['❤️', '😂', '🔥', '🙏', '😮', '😢', '👍', '👏', '🎉', '😍', '🤔', '👌'];
 
@@ -101,13 +88,22 @@ export default function HiddenDiscussionScreen() {
     placeholderData: (prev) => prev,
   });
 
+  const commentsQuery = useQuery({
+    queryKey: ['post', postId, 'comments'],
+    queryFn: () => listComments(postId),
+    enabled: Boolean(postId),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
+  });
+
   // Refresh when the user comes back to this post from another screen
-  // — only for the post itself. Responses are refreshed on demand
-  // (pull or after submit) to avoid flicker from too-frequent fetches.
   // (e.g. opened notifications, switched to home and back). Reaction /
-  // response counts may have changed in the background.
+  // response / comment counts may have changed in the background.
   useRefreshOnFocus(['post', postId]);
   useRefreshOnFocus(['post', postId, 'responses']);
+  useRefreshOnFocus(['post', postId, 'comments']);
 
   const [draft, setDraft] = useState('');
   const [now, setNow] = useState<number>(() => Date.now());
@@ -125,9 +121,6 @@ export default function HiddenDiscussionScreen() {
   );
 
   const post = postQuery.data;
-  const isAuthor =
-    !!post && postQuery.data !== undefined && false; // author self-id isn't returned; the "Reveal" button is gated by membership + post author status. For Phase 3a the reveal button is hidden for non-authors.
-  void isAuthor;
 
   const submitMutation = useMutation({
     mutationFn: (body: string) => submitResponse(postId, { body }),
@@ -177,22 +170,11 @@ export default function HiddenDiscussionScreen() {
     },
   });
 
-  const revealMutation = useMutation({
-    mutationFn: () => revealPost(postId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['post', postId] });
-      queryClient.invalidateQueries({ queryKey: ['post', postId, 'responses'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
-      if (post?.groupId) {
-        queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
-      }
-    },
-  });
-
   const commentMutation = useMutation({
     mutationFn: (body: string) => createCommentApi(postId, { body }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
+      queryClient.invalidateQueries({ queryKey: ['post', postId, 'comments'] });
       queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
       if (post?.groupId) {
         queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
@@ -206,8 +188,6 @@ export default function HiddenDiscussionScreen() {
 
   return (
     <View className="flex-1 bg-surface">
-      <View className="absolute inset-0 bg-surface" pointerEvents="none" />
-
       <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           className="flex-1"
@@ -215,49 +195,14 @@ export default function HiddenDiscussionScreen() {
         >
           <ScrollView
             className="flex-1"
-            contentContainerClassName="px-6 pt-4 pb-8"
+            contentContainerClassName="px-4 pt-3 pb-8"
             keyboardShouldPersistTaps="handled"
           >
-            {/* Top bar */}
-            <View className="flex-row items-start justify-between gap-3 mb-6">
-              <View className="flex-1 min-w-0">
-                <View
-                  className="self-start px-3 py-1.5 rounded-full"
-                  style={{ backgroundColor: HERO_OVERLAY_STRONG }}
-                >
-                  <Text variant="caption" bold tone="primary" numberOfLines={1}>
-                    {post?.status === 'revealed' ? 'Discussion revealed' : 'Hidden Discussion'}
-                  </Text>
-                </View>
-                <Text variant="meta" tone="tertiary" className="mt-2 leading-[18px]" numberOfLines={2}>
-                  {post?.status === 'revealed'
-                    ? 'All responses are visible'
-                    : 'Responses are hidden until the timer ends'}
-                </Text>
-              </View>
-              <View
-                className="px-3 py-1.5 rounded-full"
-                style={{ backgroundColor: HERO_OVERLAY_STRONG }}
-              >
-                <Text
-                  variant="metaStrong"
-                  tone="primary"
-                  numberOfLines={1}
-                  style={{
-                    fontVariant: ['tabular-nums'],
-                    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
-                  }}
-                >
-                  {countdownText}
-                </Text>
-              </View>
-            </View>
-
             {isInitialLoad ? (
               <View className="gap-3 pt-2">
-                <View className="h-6 w-24 rounded-full" style={{ backgroundColor: colors.surface.muted, borderRadius: 9999 }} />
-                <View className="h-4 w-full rounded-md" style={{ backgroundColor: colors.surface.muted }} />
-                <View className="h-40 w-full rounded-lg" style={{ backgroundColor: colors.surface.muted, borderRadius: 16 }} />
+                <View className="h-6 w-24 rounded-full" style={{ backgroundColor: MUTED_BG }} />
+                <View className="h-4 w-full rounded-md" style={{ backgroundColor: MUTED_BG }} />
+                <View className="h-40 w-full rounded-lg" style={{ backgroundColor: MUTED_BG, borderRadius: radius.lg }} />
               </View>
             ) : postQuery.error ? (
               <View className="py-8 items-center">
@@ -267,7 +212,7 @@ export default function HiddenDiscussionScreen() {
                 <Pressable
                   onPress={() => postQuery.refetch()}
                   className="px-4 py-2 rounded-md active:opacity-80"
-                  style={{ backgroundColor: HERO_OVERLAY_STRONG }}
+                  style={{ backgroundColor: SUBTLE_PILL_BG }}
                 >
                   <Text variant="bodyStrong" tone="primary">
                     Retry
@@ -275,281 +220,100 @@ export default function HiddenDiscussionScreen() {
                 </Pressable>
               </View>
             ) : post ? (
-              <PostBody post={post} />
-            ) : null}
-
-            {post ? (
               <>
-                {/* Dynamic Interaction bar */}
-                <View
-                  className="mt-6 pt-4"
-                  style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
-                >
-                  <Text variant="title" tone="primary" className="mb-3">
-                    Interact
-                  </Text>
-
-                  {/* Like */}
-                  {(post.allowedInteractions ?? []).includes('like') ? (
-                    <View className="mb-3">
-                      <Pressable
-                        onPress={() => reactionMutation.mutate('like')}
-                        className="self-start flex-row items-center px-4 py-2 rounded-full border active:opacity-80"
-                        style={{ backgroundColor: post.viewerReaction === 'like' ? colors.brand.primary : colors.brand.primarySubtle, borderColor: colors.brand.primary }}
-                      >
-                        <Ionicons name={post.viewerReaction === 'like' ? 'heart' : 'heart-outline'} size={16} color={post.viewerReaction === 'like' ? colors.brand.onPrimary : colors.brand.primary} />
-                        <Text variant="caption" bold tone={post.viewerReaction === 'like' ? 'onDark' : 'primary'} className="ml-1.5">Like</Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
-
-                  {/* Yes/No */}
-                  {(post.allowedInteractions ?? []).includes('yesNo') ? (
-                    <View className="mb-3">
-                      <Text variant="caption" tone="secondary" className="mb-2">Vote</Text>
-                      <View className="flex-row gap-2">
-                        {(['yes', 'no'] as const).map((v) => {
-                          const active = (post as unknown as { viewerYesNoVote: string | null }).viewerYesNoVote === v;
-                          return (
-                            <Pressable key={v} onPress={() => yesNoMutation.mutate(v)} className={['flex-1 py-2.5 rounded-md border items-center', active ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}>
-                              <Text variant="bodyStrong" tone={active ? 'onDark' : 'primary'}>{v === 'yes' ? 'Yes' : 'No'}</Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </View>
-                  ) : null}
-
-                  {/* Rating */}
-                  {(post.allowedInteractions ?? []).includes('rating') ? (
-                    <View className="mb-3">
-                      <Text variant="caption" tone="secondary" className="mb-2">Rating 1–{post.ratingScale ?? 5}</Text>
-                      <View className="flex-row flex-wrap gap-1.5">
-                        {Array.from({ length: post.ratingScale ?? 5 }, (_, i) => i + 1).map((n) => {
-                          const active = (post as unknown as { viewerRating: number | null }).viewerRating === n;
-                          return (
-                            <Pressable key={n} onPress={() => ratingMutation.mutate(n)} className={['w-10 h-10 rounded-md border items-center justify-center', active ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}>
-                              <Text variant="caption" bold tone={active ? 'onDark' : 'primary'}>{n}</Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </View>
-                  ) : null}
-
-                  {/* Reaction any emoji */}
-                  {(post.allowedInteractions ?? []).includes('reaction') ? (
-                    <View className="mb-1">
-                      <Text variant="caption" tone="secondary" className="mb-2">React with emoji</Text>
-                      <View className="flex-row flex-wrap gap-2">
-                        {EMOJI_PICKER.map((emoji) => {
-                          const active = post.viewerReaction === emoji;
-                          return (
-                            <Pressable key={emoji} onPress={() => reactionAnyMutation.mutate(emoji)} className={['w-10 h-10 rounded-md border items-center justify-center', active ? 'bg-primary-subtle border-primary' : 'bg-surface border-border'].join(' ')}>
-                              <Text style={{ fontSize: 18 }}>{emoji}</Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                      <Text variant="meta" tone="tertiary" className="mt-2">{post.reactionCount} reactions</Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                {/* Responses */}
-                <ResponsesSection
-                  responses={responsesQuery.data ?? []}
-                  error={responsesQuery.error ?? null}
-                  postStatus={post.status}
-                  isLoading={responsesQuery.isLoading}
+                <PostHeader post={post} countdownText={countdownText} />
+                <EngagementBar
+                  post={post}
+                  onLike={() => reactionMutation.mutate('like')}
+                  onYesNo={(v) => yesNoMutation.mutate(v)}
+                  onRate={(n) => ratingMutation.mutate(n)}
+                  onReact={(emoji) => reactionAnyMutation.mutate(emoji)}
                 />
 
-                {/* Comments (composer only — comments are read-when-implemented in Phase 4) */}
-                <View
-                  className="mt-6 pt-4"
-                  style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
+                <ThreadSection
+                  title="Responses"
+                  statusPill={
+                    post.status === 'active'
+                      ? <Pill label="Hidden until reveal" tone="info" />
+                      : <Pill label="Revealed" tone="success" />
+                  }
+                  showTopFilter
                 >
-                  <Text variant="title" tone="primary" className="mb-1">
-                    Comments
+                  {responsesQuery.isLoading ? (
+                    <View className="py-3 items-center">
+                      <ActivityIndicator color={colors.brand.primary} />
+                    </View>
+                  ) : post.status === 'active' ? (
+                    <Text variant="caption" tone="tertiary" className="mb-2">
+                      {responsesQuery.error instanceof Error
+                        ? responsesQuery.error.message
+                        : 'Responses are hidden until reveal.'}
+                    </Text>
+                  ) : (responsesQuery.data ?? []).length === 0 ? (
+                    <Text variant="caption" tone="tertiary">
+                      No responses yet. Be the first.
+                    </Text>
+                  ) : (
+                    (responsesQuery.data ?? []).map((r) => (
+                      <ThreadRow key={r.id} name={r.authorName ?? 'Anonymous'} body={r.body} createdAt={r.createdAt} />
+                    ))
+                  )}
+                </ThreadSection>
+
+                <ThreadSection title="Comments">
+                  {commentsQuery.isLoading ? (
+                    <View className="py-3 items-center">
+                      <ActivityIndicator color={colors.brand.primary} />
+                    </View>
+                  ) : (commentsQuery.data ?? []).length === 0 ? (
+                    <Text variant="caption" tone="tertiary" className="mb-2">
+                      No comments yet — meta-discussion only, never anonymous.
+                    </Text>
+                  ) : (
+                    (commentsQuery.data ?? []).map((c: CommentItem) => (
+                      <ThreadRow key={c.id} name={c.authorName ?? 'Unknown'} body={c.body} createdAt={c.createdAt} />
+                    ))
+                  )}
+
+                  <ReplyComposer
+                    value={commentDraft}
+                    onChangeText={setCommentDraft}
+                    placeholder="Comment on this discussion…"
+                    accessibilityLabel="Comment"
+                    isPending={commentMutation.isPending}
+                    isError={commentMutation.isError}
+                    errorText="Couldn't post the comment. Try again."
+                    onSend={() => {
+                      const trimmed = commentDraft.trim();
+                      if (!trimmed) return;
+                      commentMutation.mutate(trimmed, { onSuccess: () => setCommentDraft('') });
+                    }}
+                  />
+                </ThreadSection>
+
+                <View className="pt-5 mt-1">
+                  <Text variant="title" tone="primary" className="mb-0.5">
+                    Submit your response
                   </Text>
                   <Text variant="caption" tone="tertiary" className="mb-3">
-                    {post.commentCount === 0
-                      ? 'No comments yet — meta-discussion only, never anonymous.'
-                      : `${post.commentCount} comment${post.commentCount === 1 ? '' : 's'}`}
+                    Visible to others after the timer ends.
                   </Text>
-                  <View
-                    className="rounded-md p-3 mb-2"
-                    style={{ backgroundColor: HERO_OVERLAY }}
-                  >
-                    <View
-                      className="rounded-md px-3 py-2 mb-3"
-                      style={{ backgroundColor: HERO_OVERLAY }}
-                    >
-                      <TextInput
-                        value={commentDraft}
-                        onChangeText={setCommentDraft}
-                        placeholder="Comment on this discussion…"
-                        placeholderTextColor={colors.text.tertiary}
-                        className="text-text-primary min-h-[36px] max-h-[80px] p-0"
-                        multiline
-                        editable={!commentMutation.isPending}
-                        accessibilityLabel="Comment"
-                      />
-                    </View>
-                    <View className="flex-row justify-end">
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Post comment"
-                        onPress={() => {
-                          const trimmed = commentDraft.trim();
-                          if (!trimmed) return;
-                          commentMutation.mutate(trimmed, {
-                            onSuccess: () => setCommentDraft(''),
-                          });
-                        }}
-                        disabled={commentMutation.isPending || commentDraft.trim().length === 0}
-                        className="px-4 py-2 rounded-md"
-                        style={{
-                          backgroundColor: colors.brand.primary,
-                          opacity: commentMutation.isPending || commentDraft.trim().length === 0 ? 0.55 : 1,
-                        }}
-                      >
-                        <Text variant="caption" bold tone="primary">
-                          {commentMutation.isPending ? 'Posting…' : 'Post comment'}
-                        </Text>
-                      </Pressable>
-                    </View>
-                    {commentMutation.isError ? (
-                      <Text variant="meta" className="mt-2" style={{ color: HERO_ERROR }}>
-                        Couldn't post the comment. Try again.
-                      </Text>
-                    ) : null}
-                  </View>
+                  <ReplyComposer
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder="Write your response…"
+                    accessibilityLabel="Your response"
+                    isPending={submitMutation.isPending}
+                    isError={submitMutation.isError}
+                    errorText="Couldn't send your response. Try again."
+                    onSend={() => {
+                      const trimmed = draft.trim();
+                      if (!trimmed) return;
+                      submitMutation.mutate(trimmed);
+                    }}
+                  />
                 </View>
               </>
-            ) : null}
-
-            {/* Composer — response input */}
-            {post ? (
-              <View
-                className="pt-6 mt-6"
-                style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
-              >
-                <View className="mb-3 flex-row items-center justify-between">
-                  <View className="flex-1">
-                    <Text variant="title" tone="primary">
-                      Submit your response
-                    </Text>
-                    <Text variant="caption" tone="tertiary" className="mt-1">
-                      Visible to others after the timer ends.
-                    </Text>
-                  </View>
-                  {post.status === 'active' ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Reveal now"
-                      onPress={() => {
-                        Alert.alert(
-                          'Reveal now?',
-                          'This permanently reveals all responses for this group.',
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                              text: 'Reveal',
-                              style: 'destructive',
-                              onPress: () => revealMutation.mutate(),
-                            },
-                          ],
-                        );
-                      }}
-                      disabled={revealMutation.isPending}
-                      className="px-3 py-2 rounded-md active:opacity-80"
-                      style={{
-                        backgroundColor: HERO_OVERLAY_STRONG,
-                        opacity: revealMutation.isPending ? 0.55 : 1,
-                      }}
-                    >
-                      <Text variant="caption" bold tone="primary">
-                        Reveal now
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-
-                <View
-                  className="rounded-md p-3"
-                  style={{ backgroundColor: HERO_OVERLAY }}
-                >
-                  <View
-                    className="rounded-md px-3 py-2 mb-3"
-                    style={{ backgroundColor: HERO_OVERLAY }}
-                  >
-                    <TextInput
-                      value={draft}
-                      onChangeText={setDraft}
-                      placeholder="Write a comment…"
-                      placeholderTextColor={colors.text.tertiary}
-                      className="text-text-primary min-h-[36px] max-h-[120px] p-0"
-                      multiline
-                      editable={!submitMutation.isPending}
-                      accessibilityLabel="Your response"
-                    />
-                  </View>
-
-                  <View className="flex-row items-center justify-between">
-                    <View className="flex-row items-center gap-4">
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Attach image"
-                        className="w-8 h-8 items-center justify-center active:opacity-70"
-                      >
-                        <MaterialCommunityIcons name="image-outline" size={20} color={HERO_ICON_MUTED} />
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Attach video"
-                        className="w-8 h-8 items-center justify-center active:opacity-70"
-                      >
-                        <MaterialCommunityIcons name="video-outline" size={20} color={HERO_ICON_MUTED} />
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Attach audio"
-                        className="w-8 h-8 items-center justify-center active:opacity-70"
-                      >
-                        <MaterialCommunityIcons name="music-note-outline" size={20} color={HERO_ICON_MUTED} />
-                      </Pressable>
-                    </View>
-
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Send response"
-                      onPress={() => {
-                        const trimmed = draft.trim();
-                        if (!trimmed) return;
-                        submitMutation.mutate(trimmed);
-                      }}
-                      disabled={submitMutation.isPending || draft.trim().length === 0}
-                      className={`w-10 h-10 rounded-full items-center justify-center ${
-                        submitMutation.isPending || draft.trim().length === 0 ? 'opacity-50' : 'active:opacity-90'
-                      }`}
-                      style={{ backgroundColor: colors.brand.primary }}
-                    >
-                      {submitMutation.isPending ? (
-                        <ActivityIndicator color={colors.brand.onPrimary} size="small" />
-                      ) : (
-                        <MaterialCommunityIcons name="send" size={18} color={colors.brand.onPrimary} />
-                      )}
-                    </Pressable>
-                  </View>
-
-                  {submitMutation.isError ? (
-                    <Text variant="meta" className="mt-2" style={{ color: HERO_ERROR }}>
-                      Couldn't send your response. Try again.
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
             ) : null}
           </ScrollView>
         </KeyboardAvoidingView>
@@ -558,126 +322,336 @@ export default function HiddenDiscussionScreen() {
   );
 }
 
-function PostBody({ post }: { post: PostDetail }) {
+function PostHeader({ post, countdownText }: { post: PostDetail; countdownText: string }) {
   const initials = authorInitials(post.authorName);
   const avatarColor = avatarColorFor(post.authorId);
   const firstMedia = post.media?.[0];
+  const isRevealed = post.status === 'revealed';
 
   return (
-    <>
-      {/* Author card */}
-      <View className="flex-row items-center mb-4">
+    <View className="mb-3">
+      {/* Author row */}
+      <View className="flex-row items-center mb-2.5">
         <View
-          className="items-center justify-center mr-3"
-          style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: 9999, backgroundColor: avatarColor }}
+          className="items-center justify-center mr-2.5"
+          style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: radius.full, backgroundColor: avatarColor }}
         >
           <Text variant="metaStrong" tone="primary">
             {initials}
           </Text>
         </View>
-        <View className="flex-1 min-w-0">
+        <View className="flex-1 min-w-0 flex-row items-center flex-wrap">
           <Text variant="bodyStrong" tone="primary" numberOfLines={1}>
             {post.authorName ?? 'Unknown author'}
           </Text>
-          <Text variant="meta" tone="tertiary" className="mt-0.5">
+          <Text variant="meta" tone="tertiary" className="ml-2">
             {formatRelativeTime(post.createdAt)}
+          </Text>
+        </View>
+        <View className="px-2.5 py-1 rounded-full ml-2" style={{ backgroundColor: SUBTLE_PILL_BG }}>
+          <Text
+            variant="caption"
+            bold
+            tone="primary"
+            numberOfLines={1}
+            style={{
+              fontVariant: ['tabular-nums'],
+              fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+            }}
+          >
+            {isRevealed ? 'Revealed' : countdownText}
           </Text>
         </View>
       </View>
 
       {/* Caption */}
-      <Text variant="h2" tone="primary" className="mb-4">
+      <Text variant="h2" tone="primary" className="mb-2">
         {post.caption}
       </Text>
 
-      {/* Media (single full-width preview, 16:9) */}
-      {firstMedia ? <MediaPreview item={firstMedia} /> : null}
-    </>
-  );
-}
-
-function ResponsesSection({
-  responses,
-  error,
-  postStatus,
-  isLoading,
-}: {
-  responses: ResponseItem[];
-  error: unknown;
-  postStatus: string;
-  isLoading: boolean;
-}) {
-  const errorMessage =
-    error instanceof Error ? error.message : 'Could not load responses.';
-  // Show hidden notice whenever post is active — not only when error exists,
-  // to avoid flicker during fetch where error is briefly null.
-  const showHiddenNotice = postStatus === 'active';
-
-  return (
-    <View
-      className="mt-6 pt-4"
-      style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: HERO_BORDER }}
-    >
-      <View className="flex-row items-center justify-between mb-3">
-        <Text variant="title" tone="primary">
-          Responses
-        </Text>
-        {postStatus === 'active' ? (
-          <Pill label="Hidden until reveal" tone="info" />
-        ) : (
-          <Pill label="Revealed" tone="success" />
-        )}
-      </View>
-
-      {isLoading ? (
-        <View className="py-3 items-center">
-          <ActivityIndicator color={colors.brand.primary} />
-        </View>
-      ) : showHiddenNotice ? (
-        <Text variant="caption" tone="tertiary" className="mb-3">
-          {error ? errorMessage : 'Responses are hidden until reveal.'}
-        </Text>
-      ) : responses.length === 0 ? (
-        <Text variant="caption" tone="tertiary">
-          No responses yet. Be the first.
+      {!isRevealed ? (
+        <Text variant="meta" tone="tertiary" className="mb-2.5">
+          Responses are hidden until the timer ends. Only your own reply is visible to you.
         </Text>
       ) : null}
 
-      {responses.map((r) => (
-        <ResponseRow key={r.id} item={r} />
-      ))}
+      {/* Media (single full-width preview, 16:9) */}
+      {firstMedia ? <MediaPreview item={firstMedia} /> : null}
     </View>
   );
 }
 
-function ResponseRow({ item }: { item: ResponseItem }) {
-  const initials = authorInitials(item.authorName);
+/**
+ * Compact inline engagement row — one entry per enabled interaction type,
+ * matching plan §10.1's `[♡ Like] [Yes][No] [★★★★★] [emoji]` density
+ * instead of the old vertically-stacked "Interact" section.
+ */
+function EngagementBar({
+  post,
+  onLike,
+  onYesNo,
+  onRate,
+  onReact,
+}: {
+  post: PostDetail;
+  onLike: () => void;
+  onYesNo: (v: 'yes' | 'no') => void;
+  onRate: (n: number) => void;
+  onReact: (emoji: string) => void;
+}) {
+  const allowed = post.allowedInteractions ?? [];
+  const viewerYesNoVote = (post as unknown as { viewerYesNoVote: string | null }).viewerYesNoVote;
+  const viewerRating = (post as unknown as { viewerRating: number | null }).viewerRating;
+
+  if (allowed.length === 0) return null;
+
   return (
     <View
-      className="flex-row items-start py-3"
-      style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: HERO_BORDER }}
+      className="flex-row items-center flex-wrap gap-2 py-3 mb-1"
+      style={{ borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
     >
+      {allowed.includes('like') ? (
+        <Pressable
+          onPress={onLike}
+          accessibilityRole="button"
+          accessibilityLabel="Like"
+          className="flex-row items-center px-3 py-1.5 rounded-full border active:opacity-80"
+          style={{ backgroundColor: post.viewerReaction === 'like' ? colors.brand.primary : colors.surface.bg, borderColor: colors.brand.primary }}
+        >
+          <Ionicons name={post.viewerReaction === 'like' ? 'heart' : 'heart-outline'} size={15} color={post.viewerReaction === 'like' ? colors.brand.onPrimary : colors.brand.primary} />
+          <Text variant="caption" bold tone={post.viewerReaction === 'like' ? 'onDark' : 'primary'} className="ml-1">Like</Text>
+        </Pressable>
+      ) : null}
+
+      {allowed.includes('yesNo') ? (
+        <View className="flex-row rounded-full overflow-hidden border" style={{ borderColor: colors.brand.primary }}>
+          {(['yes', 'no'] as const).map((v) => {
+            const active = viewerYesNoVote === v;
+            return (
+              <Pressable
+                key={v}
+                onPress={() => onYesNo(v)}
+                accessibilityRole="button"
+                accessibilityLabel={v === 'yes' ? 'Vote yes' : 'Vote no'}
+                className="px-3.5 py-1.5"
+                style={{ backgroundColor: active ? colors.brand.primary : colors.surface.bg }}
+              >
+                <Text variant="caption" bold tone={active ? 'onDark' : 'primary'}>{v === 'yes' ? 'Yes' : 'No'}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {allowed.includes('rating') ? (
+        <View className="flex-row items-center flex-wrap gap-1">
+          {Array.from({ length: post.ratingScale ?? 5 }, (_, i) => i + 1).map((n) => {
+            const active = viewerRating === n;
+            return (
+              <Pressable
+                key={n}
+                onPress={() => onRate(n)}
+                accessibilityRole="button"
+                accessibilityLabel={`Rate ${n}`}
+                className="w-8 h-8 rounded-full border items-center justify-center"
+                style={{ backgroundColor: active ? colors.brand.primary : colors.surface.bg, borderColor: colors.brand.primary }}
+              >
+                <Text variant="caption" bold tone={active ? 'onDark' : 'primary'}>{n}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {allowed.includes('reaction') ? (
+        <ReactionPicker viewerReaction={post.viewerReaction} reactionCount={post.reactionCount} onReact={onReact} />
+      ) : null}
+    </View>
+  );
+}
+
+function ReactionPicker({
+  viewerReaction,
+  reactionCount,
+  onReact,
+}: {
+  viewerReaction: string | null;
+  reactionCount: number;
+  onReact: (emoji: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <View>
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        accessibilityRole="button"
+        accessibilityLabel="React with emoji"
+        className="flex-row items-center px-3 py-1.5 rounded-full border active:opacity-80"
+        style={{ backgroundColor: viewerReaction ? SUBTLE_PILL_BG : colors.surface.bg, borderColor: colors.brand.primary }}
+      >
+        <Text style={{ fontSize: 15 }}>{viewerReaction ?? '🙂'}</Text>
+        {reactionCount > 0 ? (
+          <Text variant="caption" bold tone="primary" className="ml-1">{reactionCount}</Text>
+        ) : null}
+      </Pressable>
+      {open ? (
+        <View
+          className="flex-row flex-wrap gap-1.5 p-2 mt-2 rounded-lg border"
+          style={{ backgroundColor: colors.surface.bg, borderColor: BORDER, borderRadius: radius.md }}
+        >
+          {EMOJI_PICKER.map((emoji) => (
+            <Pressable
+              key={emoji}
+              onPress={() => {
+                onReact(emoji);
+                setOpen(false);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`React with ${emoji}`}
+              className="w-9 h-9 rounded-md items-center justify-center active:opacity-70"
+            >
+              <Text style={{ fontSize: 18 }}>{emoji}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Shared thread-section shell: title + optional status pill + optional "Top ∨" filter (static, non-functional per plan). */
+function ThreadSection({
+  title,
+  statusPill,
+  showTopFilter,
+  children,
+}: {
+  title: string;
+  statusPill?: React.ReactNode;
+  showTopFilter?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <View className="mt-5 pt-4" style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER }}>
+      <View className="flex-row items-center justify-between mb-3">
+        <Text variant="title" tone="primary">
+          {title}
+        </Text>
+        {statusPill ?? null}
+      </View>
+      {showTopFilter ? (
+        <View className="flex-row items-center mb-2">
+          <Text variant="caption" tone="secondary">Top</Text>
+          <Ionicons name="chevron-down" size={14} color={colors.text.secondary} style={{ marginLeft: 2 }} />
+        </View>
+      ) : null}
+      {children}
+    </View>
+  );
+}
+
+/** One thread row: avatar, name, timestamp, wrapping body, lightweight action row. */
+function ThreadRow({ name, body, createdAt }: { name: string; body: string; createdAt: string }) {
+  const initials = authorInitials(name);
+  return (
+    <View className="flex-row items-start py-3" style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER }}>
       <View
-        className="items-center justify-center mr-3"
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: 9999,
-          backgroundColor: HERO_OVERLAY_STRONG,
-        }}
+        className="items-center justify-center mr-2.5"
+        style={{ width: THREAD_AVATAR_SIZE, height: THREAD_AVATAR_SIZE, borderRadius: radius.full, backgroundColor: SUBTLE_PILL_BG }}
       >
         <Text variant="caption" bold tone="primary">
           {initials}
         </Text>
       </View>
       <View className="flex-1 min-w-0">
-        <Text variant="bodyStrong" tone="primary" numberOfLines={1}>
-          {item.authorName ?? 'Anonymous'}
-        </Text>
+        <View className="flex-row items-center flex-wrap">
+          <Text variant="bodyStrong" tone="primary" numberOfLines={1}>
+            {name}
+          </Text>
+          <Text variant="meta" tone="tertiary" className="ml-2">
+            {formatRelativeTime(createdAt)}
+          </Text>
+        </View>
         <Text variant="body" tone="primary" className="mt-1">
-          {item.body}
+          {body}
         </Text>
+        <View className="flex-row items-center mt-1.5">
+          <Text variant="caption" tone="secondary">Like</Text>
+          <Text variant="caption" tone="tertiary" className="mx-1.5">·</Text>
+          <Text variant="caption" tone="secondary">Reply</Text>
+        </View>
       </View>
+    </View>
+  );
+}
+
+/** Rounded muted-bg composer card, shared by the comment and response inputs (plan §10.2). */
+function ReplyComposer({
+  value,
+  onChangeText,
+  placeholder,
+  accessibilityLabel,
+  isPending,
+  isError,
+  errorText,
+  onSend,
+}: {
+  value: string;
+  onChangeText: (t: string) => void;
+  placeholder: string;
+  accessibilityLabel: string;
+  isPending: boolean;
+  isError: boolean;
+  errorText: string;
+  onSend: () => void;
+}) {
+  return (
+    <View className="rounded-xl p-3" style={{ backgroundColor: MUTED_BG, borderRadius: radius.md }}>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.text.tertiary}
+        className="text-text-primary min-h-[36px] max-h-[120px] p-0 mb-2"
+        multiline
+        editable={!isPending}
+        accessibilityLabel={accessibilityLabel}
+      />
+      <View className="flex-row items-center justify-between">
+        <View className="flex-row items-center gap-4">
+          <Pressable accessibilityRole="button" accessibilityLabel="Attach image" className="w-8 h-8 items-center justify-center active:opacity-70">
+            <MaterialCommunityIcons name="image-outline" size={20} color={ICON_MUTED} />
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Attach video" className="w-8 h-8 items-center justify-center active:opacity-70">
+            <MaterialCommunityIcons name="video-outline" size={20} color={ICON_MUTED} />
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Attach audio" className="w-8 h-8 items-center justify-center active:opacity-70">
+            <MaterialCommunityIcons name="music-note-outline" size={20} color={ICON_MUTED} />
+          </Pressable>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Send"
+          onPress={onSend}
+          disabled={isPending || value.trim().length === 0}
+          className={`w-9 h-9 rounded-full items-center justify-center ${isPending || value.trim().length === 0 ? 'opacity-50' : 'active:opacity-90'}`}
+          style={{ backgroundColor: colors.brand.primary }}
+        >
+          {isPending ? (
+            <ActivityIndicator color={colors.brand.onPrimary} size="small" />
+          ) : (
+            <MaterialCommunityIcons name="send" size={17} color={colors.brand.onPrimary} />
+          )}
+        </Pressable>
+      </View>
+
+      {isError ? (
+        <Text variant="meta" className="mt-2" style={{ color: ERROR_COLOR }}>
+          {errorText}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -688,18 +662,14 @@ function MediaPreview({ item }: { item: PostMediaItem }) {
     <View
       accessibilityRole="image"
       accessibilityLabel="Attached media"
-      className="w-full aspect-[16/9] rounded-lg overflow-hidden mb-6"
-      style={{ backgroundColor: HERO_BOTTOM }}
+      className="w-full aspect-[16/9] overflow-hidden mt-1 mb-1"
+      style={{ backgroundColor: colors.surface.bg, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
     >
       {isImage ? (
         <Image source={{ uri: item.url }} className="w-full h-full" resizeMode="cover" />
       ) : (
-        <View className="flex-1 items-center justify-center" style={{ backgroundColor: HERO_BOTTOM }}>
-          <MaterialCommunityIcons
-            name="play-circle-outline"
-            size={36}
-            color={colors.brand.primary}
-          />
+        <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.surface.bg }}>
+          <MaterialCommunityIcons name="play-circle-outline" size={36} color={colors.brand.primary} />
         </View>
       )}
     </View>

@@ -30,6 +30,9 @@ vi.mock('../../config/redis.js', () => ({
     del: vi.fn(),
   },
 }));
+vi.mock('../notifications/notifications.service.js', () => ({
+  createNotification: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('../../config/env.js', () => ({
   env: {
     NODE_ENV: 'development',

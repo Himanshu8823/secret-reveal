@@ -114,6 +114,11 @@ vi.mock('../middlewares/rateLimiter.js', () => ({
   postCreateLimiter: { consume: vi.fn() },
   postResponseLimiter: { consume: vi.fn() },
   groupCreateLimiter: { consume: vi.fn() },
+  groupInviteLimiter: { consume: vi.fn() },
+  groupInviteResponseLimiter: { consume: vi.fn() },
+  groupLeaveLimiter: { consume: vi.fn() },
+  notificationsListLimiter: { consume: vi.fn() },
+  pushTokenRegisterLimiter: { consume: vi.fn() },
 }));
 
 import { prisma } from '../config/db.js';

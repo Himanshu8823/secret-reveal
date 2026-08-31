@@ -2,6 +2,7 @@ import { buildApp } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { ensureBloomLoaded } from './lib/usernameBloom.js';
+import { initRealtime } from './lib/realtime.js';
 import { startRevealWorker, stopRevealWorker } from './workers/revealWorker.js';
 
 const app = buildApp();
@@ -24,6 +25,10 @@ startRevealWorker();
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, 'backend listening');
 });
+
+// Realtime notifications — attached to the same HTTP server/port, not a
+// separate service. See lib/realtime.ts for the single-instance rationale.
+initRealtime(server);
 
 // Graceful shutdown — let in-flight requests finish on SIGTERM/SIGINT.
 const shutdown = (signal: string) => {

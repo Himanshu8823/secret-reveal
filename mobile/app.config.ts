@@ -17,7 +17,13 @@ const config: ExpoConfig = {
   android: {
     package: 'com.secretsuper.app',
   },
-  plugins: ['expo-router', 'expo-secure-store'],
+  plugins: [
+    'expo-router',
+    'expo-secure-store',
+    // No custom icon/color override — falls back to the app icon until a
+    // dedicated notification-icon asset is designed.
+    'expo-notifications',
+  ],
   experiments: {
     typedRoutes: false,
   },
