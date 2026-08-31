@@ -47,7 +47,9 @@ export type PostDetail = {
   responseCount: number;
   reactionCount: number;
   commentCount: number;
+  likeCount: number;
   viewerReaction: string | null;
+  viewerLiked: boolean;
   viewerYesNoVote: string | null;
   viewerRating: number | null;
 };
@@ -73,8 +75,10 @@ export type PostSummary = {
   reactionCount: number;
   responseCount: number;
   commentCount: number;
+  likeCount: number;
   hasReplied: boolean;
   viewerReaction: string | null;
+  viewerLiked: boolean;
 };
 
 export type ResponseItem = {

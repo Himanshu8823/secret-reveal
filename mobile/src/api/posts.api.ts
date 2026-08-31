@@ -58,14 +58,17 @@ export type PostSummary = {
   groupName: string;
   caption: string;
   status: PostStatus;
+  allowedInteractions: string[];
   createdAt: string;
   media: PostMediaItem[];
   discussionMeta: DiscussionMeta | null;
   reactionCount: number;
   commentCount: number;
   responseCount: number;
+  likeCount: number;
   hasReplied: boolean;
   viewerReaction: ReactionType | null;
+  viewerLiked: boolean;
 };
 
 export type ListPostsParams = {
@@ -111,7 +114,9 @@ export type PostDetail = {
   responseCount: number;
   reactionCount: number;
   commentCount: number;
+  likeCount: number;
   viewerReaction: string | null;
+  viewerLiked: boolean;
   viewerYesNoVote: string | null;
   viewerRating: number | null;
 };
@@ -205,6 +210,14 @@ export async function toggleReaction(
 export async function toggleReactionAny(postId: string, type: string): Promise<ToggleReactionResponse> {
   return unwrap<ToggleReactionResponse>(
     apiClient.post<ApiEnvelope<ToggleReactionResponse>>(`/posts/${postId}/reactions-any`, { type }),
+  );
+}
+
+export type ToggleLikeResponse = { liked: boolean; likeCount: number };
+
+export async function toggleLike(postId: string): Promise<ToggleLikeResponse> {
+  return unwrap<ToggleLikeResponse>(
+    apiClient.post<ApiEnvelope<ToggleLikeResponse>>(`/posts/${postId}/likes`),
   );
 }
 

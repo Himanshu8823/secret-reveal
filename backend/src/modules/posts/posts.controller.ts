@@ -13,6 +13,7 @@ import {
   submitResponse as submitResponseService,
   submitYesNoVote as submitYesNoVoteService,
   toggleReactionAny as toggleReactionAnyService,
+  toggleLike as toggleLikeService,
 } from './posts.service.js';
 import {
   createCommentSchema,
@@ -182,6 +183,17 @@ export async function postReactionAny(req: Request, res: Response, next: NextFun
     const { id } = postIdParamSchema.parse(req.params);
     const body = reactionSchema.parse(req.body);
     const result = await toggleReactionAnyService({ viewerId: user.id, postId: id, type: body.type });
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function postToggleLike(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const result = await toggleLikeService({ viewerId: user.id, postId: id });
     res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);

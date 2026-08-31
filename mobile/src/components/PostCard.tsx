@@ -107,18 +107,12 @@ export function PostCard({ post, onPress }: Props) {
         </View>
 
         <View className="flex-row items-center gap-4">
-          <CountChip
-            icon="heart-outline"
-            label={`${post.reactionCount}`}
-          />
-          <CountChip
-            icon="chatbubble-outline"
-            label={`${post.responseCount}`}
-          />
-          <CountChip
-            icon="chatbox-outline"
-            label={`${post.commentCount}`}
-          />
+          {post.allowedInteractions.includes('like') ? (
+            <CountChip icon="heart-outline" label={`${post.likeCount}`} />
+          ) : null}
+          {post.allowedInteractions.includes('textComment') ? (
+            <CountChip icon="chatbox-outline" label={`${post.commentCount}`} />
+          ) : null}
         </View>
       </View>
     </Pressable>

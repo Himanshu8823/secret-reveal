@@ -24,6 +24,7 @@ import {
   listComments,
   listResponses,
   ratePost,
+  toggleLike,
   toggleReactionAny,
   voteYesNo,
   type CommentItem,
@@ -153,6 +154,38 @@ export default function HiddenDiscussionScreen() {
     },
   });
 
+  // Independent from reactionAnyMutation — Like and emoji-reaction are
+  // separate backend models (PostLike vs Reaction), never overwrite
+  // each other's state.
+  const likeMutation = useMutation({
+    mutationFn: () => toggleLike(postId),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ['post', postId] });
+      const previous = queryClient.getQueryData<PostDetail>(['post', postId]);
+      if (previous) {
+        const nextLiked = !previous.viewerLiked;
+        queryClient.setQueryData<PostDetail>(['post', postId], {
+          ...previous,
+          viewerLiked: nextLiked,
+          likeCount: previous.likeCount + (nextLiked ? 1 : -1),
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['post', postId], context.previous);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['post', postId] });
+      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+      if (post?.groupId) {
+        queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
+      }
+    },
+  });
+
   const yesNoMutation = useMutation({
     mutationFn: (value: 'yes' | 'no') => voteYesNo(postId, value),
     onSuccess: () => {
@@ -221,7 +254,7 @@ export default function HiddenDiscussionScreen() {
                 <PostHeader post={post} countdownText={countdownText} />
                 <EngagementBar
                   post={post}
-                  onLike={() => reactionAnyMutation.mutate('like')}
+                  onLike={() => likeMutation.mutate()}
                   onYesNo={(v) => yesNoMutation.mutate(v)}
                   onRate={(n) => ratingMutation.mutate(n)}
                   onReact={(emoji) => reactionAnyMutation.mutate(emoji)}
@@ -434,9 +467,9 @@ function EngagementBar({
           hitSlop={8}
         >
           <Ionicons
-            name={post.viewerReaction === 'like' ? 'heart' : 'heart-outline'}
+            name={post.viewerLiked ? 'heart' : 'heart-outline'}
             size={26}
-            color={post.viewerReaction === 'like' ? colors.semantic.danger : colors.text.primary}
+            color={post.viewerLiked ? colors.semantic.danger : colors.text.primary}
           />
         </Pressable>
       ) : null}

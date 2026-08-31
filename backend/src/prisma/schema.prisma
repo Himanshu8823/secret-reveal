@@ -37,6 +37,7 @@ model User {
   yesNoVotes     YesNoVote[]
   ratings        Rating[]
   notifications  Notification[]
+  postLikes      PostLike[]
 
   @@map("users")
 }
@@ -158,6 +159,7 @@ model Post {
   comments       Comment[]
   yesNoVotes     YesNoVote[]
   ratings        Rating[]
+  postLikes      PostLike[]
 
   @@index([groupId, createdAt(sort: Desc)])
   @@index([authorId, createdAt(sort: Desc)])
@@ -225,7 +227,7 @@ model ResponseMedia {
 model Reaction {
   postId    String   @db.Uuid
   userId    String   @db.Uuid
-  type      String   @default("like") @db.VarChar(20) // single emoji unicode (e.g. "❤️","😂","🔥") or "like"
+  type      String   @default("like") @db.VarChar(20) // single emoji unicode (e.g. "❤️","😂","🔥") — Like has its own PostLike model, this is emoji-only
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
@@ -234,6 +236,22 @@ model Reaction {
   @@id([postId, userId])
   @@index([postId])
   @@map("reactions")
+}
+
+// Separate from Reaction on purpose — Like and emoji-reaction are
+// independent per product decision (a viewer can have both active on the
+// same post at once, neither ever overwrites the other).
+model PostLike {
+  postId    String   @db.Uuid
+  userId    String   @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([postId])
+  @@map("post_likes")
 }
 
 model YesNoVote {

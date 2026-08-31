@@ -18,6 +18,7 @@ import {
   postRating,
   postReactionAny,
   postResponse,
+  postToggleLike,
   postYesNoVote,
 } from './posts.controller.js';
 
@@ -59,4 +60,5 @@ postsRouter.get('/:id/votes', getVotes);
 postsRouter.post('/:id/ratings', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postRating);
 postsRouter.get('/:id/ratings', getRatings);
 postsRouter.post('/:id/reactions-any', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postReactionAny);
+postsRouter.post('/:id/likes', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postToggleLike);
 postsRouter.get('/:id/my-vote', getMyVoteDetail);

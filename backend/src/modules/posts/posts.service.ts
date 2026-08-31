@@ -226,7 +226,7 @@ async function loadPostFromDb(viewerId: string, postId: string): Promise<PostDet
       group: { select: { id: true, name: true } },
       media: { include: { media: true }, orderBy: { order: 'asc' } },
       discussionMeta: true,
-      _count: { select: { responses: true, reactions: true, comments: true } },
+      _count: { select: { responses: true, reactions: true, comments: true, postLikes: true } },
     },
   });
 
@@ -242,7 +242,7 @@ async function loadPostFromDb(viewerId: string, postId: string): Promise<PostDet
     throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member of this group');
   }
 
-  const [viewerReactionRow, viewerYesNoRow, viewerRatingRow] = await Promise.all([
+  const [viewerReactionRow, viewerYesNoRow, viewerRatingRow, viewerLikeRow] = await Promise.all([
     prisma.reaction.findUnique({
       where: { postId_userId: { postId, userId: viewerId } },
       select: { type: true },
@@ -254,6 +254,10 @@ async function loadPostFromDb(viewerId: string, postId: string): Promise<PostDet
     prisma.rating.findUnique({
       where: { postId_userId: { postId, userId: viewerId } },
       select: { value: true },
+    }),
+    prisma.postLike.findUnique({
+      where: { postId_userId: { postId, userId: viewerId } },
+      select: { postId: true },
     }),
   ]);
 
@@ -291,7 +295,9 @@ async function loadPostFromDb(viewerId: string, postId: string): Promise<PostDet
     responseCount: post._count.responses,
     reactionCount: post._count.reactions,
     commentCount: post._count.comments,
+    likeCount: post._count.postLikes,
     viewerReaction: viewerReactionRow?.type ?? null,
+    viewerLiked: viewerLikeRow != null,
     viewerYesNoVote: viewerYesNoRow?.value ?? null,
     viewerRating: viewerRatingRow?.value ?? null,
   };
@@ -521,7 +527,7 @@ export async function listPosts(input: ListPostsInput): Promise<ListPostsResult>
       group: { select: { id: true, name: true } },
       media: { include: { media: true }, orderBy: { order: 'asc' } },
       discussionMeta: true,
-      _count: { select: { responses: true, reactions: true, comments: true } },
+      _count: { select: { responses: true, reactions: true, comments: true, postLikes: true } },
     },
   });
 
@@ -552,8 +558,16 @@ export async function listPosts(input: ListPostsInput): Promise<ListPostsResult>
           where: { postId: { in: postIds }, userId: viewerId },
           select: { postId: true, type: true },
         });
+  const viewerLikes =
+    postIds.length === 0
+      ? []
+      : await prisma.postLike.findMany({
+          where: { postId: { in: postIds }, userId: viewerId },
+          select: { postId: true },
+        });
   const hasRepliedByPost = new Set(viewerResponses.map((r) => r.postId));
   const reactionByPost = new Map(viewerReactions.map((r) => [r.postId, r.type]));
+  const likedByPost = new Set(viewerLikes.map((l) => l.postId));
 
   const posts: PostSummary[] = page.map((p) => {
     const media: PostMediaItem[] = p.media.map((pm) => ({
@@ -592,8 +606,10 @@ export async function listPosts(input: ListPostsInput): Promise<ListPostsResult>
       reactionCount: p._count.reactions,
       responseCount: p._count.responses,
       commentCount: p._count.comments,
+      likeCount: p._count.postLikes,
       hasReplied: hasRepliedByPost.has(p.id),
       viewerReaction: reactionByPost.get(p.id) ?? null,
+      viewerLiked: likedByPost.has(p.id),
     };
   });
 
@@ -898,6 +914,26 @@ export async function toggleReactionAny(input: { viewerId: string; postId: strin
   });
   await cacheDel(`cache:post:${postId}:viewer:${viewerId}`);
   return { reacted: true, type, count: await prisma.reaction.count({ where: { postId } }) };
+}
+
+// Separate from toggleReactionAny on purpose — Like and emoji-reaction are
+// independent per product decision, backed by separate tables (PostLike vs
+// Reaction), so one never overwrites the other's state.
+export async function toggleLike(input: { viewerId: string; postId: string }) {
+  const { viewerId, postId } = input;
+  await ensureInteractionAllowed(postId, viewerId, 'like');
+  const existing = await prisma.postLike.findUnique({
+    where: { postId_userId: { postId, userId: viewerId } },
+    select: { postId: true },
+  });
+  if (existing) {
+    await prisma.postLike.delete({ where: { postId_userId: { postId, userId: viewerId } } });
+    await cacheDel(`cache:post:${postId}:viewer:${viewerId}`);
+    return { liked: false, likeCount: await prisma.postLike.count({ where: { postId } }) };
+  }
+  await prisma.postLike.create({ data: { postId, userId: viewerId } });
+  await cacheDel(`cache:post:${postId}:viewer:${viewerId}`);
+  return { liked: true, likeCount: await prisma.postLike.count({ where: { postId } }) };
 }
 
 export async function getMyVote(viewerId: string, postId: string) {
