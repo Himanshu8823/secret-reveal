@@ -2,6 +2,7 @@ import { Pressable, View, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text, Pill } from './ui';
 import { elevation, radius, colors } from '../theme';
+import { avatarColorFor } from '../utils/avatarColor';
 import type { PostSummary } from '../api/posts.api';
 
 /**
@@ -53,7 +54,7 @@ export function PostCard({ post, onPress }: Props) {
             backgroundColor: avatarColor,
           }}
         >
-          <Text variant="metaStrong" tone="onDark">
+          <Text variant="metaStrong" tone="primary">
             {initials}
           </Text>
         </View>
@@ -187,11 +188,3 @@ function authorInitials(name: string | null): string {
   ).toUpperCase();
 }
 
-function avatarColorFor(seed: string): string {
-  const palette = ['#0B49FA', '#7A4DFF', '#22C7B7', '#FFB020', '#FF3D7F'];
-  let h = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return palette[h % palette.length] as string;
-}

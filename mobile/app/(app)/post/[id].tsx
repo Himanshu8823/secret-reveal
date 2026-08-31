@@ -3,18 +3,19 @@ import {
   View,
   TextInput,
   Pressable,
-  Image,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { colors, radius } from '../../../src/theme';
+import { colors, radius, elevation } from '../../../src/theme';
+import { avatarColorFor } from '../../../src/utils/avatarColor';
 import { Text, Pill } from '../../../src/components/ui';
 import { useRefreshOnFocus } from '../../../src/hooks/useRefreshOnFocus';
 import {
@@ -23,8 +24,6 @@ import {
   listComments,
   listResponses,
   ratePost,
-  submitResponse,
-  toggleReaction,
   toggleReactionAny,
   voteYesNo,
   type CommentItem,
@@ -105,7 +104,6 @@ export default function HiddenDiscussionScreen() {
   useRefreshOnFocus(['post', postId, 'responses']);
   useRefreshOnFocus(['post', postId, 'comments']);
 
-  const [draft, setDraft] = useState('');
   const [now, setNow] = useState<number>(() => Date.now());
 
   // Countdown tick — for v1 we just re-render every second. Phase 4
@@ -122,37 +120,36 @@ export default function HiddenDiscussionScreen() {
 
   const post = postQuery.data;
 
-  const submitMutation = useMutation({
-    mutationFn: (body: string) => submitResponse(postId, { body }),
-    onSuccess: () => {
-      setDraft('');
-      // Invalidate the post so responseCount stays fresh, and the
-      // responses list so the new entry shows up for the author.
-      queryClient.invalidateQueries({ queryKey: ['post', postId] });
-      queryClient.invalidateQueries({ queryKey: ['post', postId, 'responses'] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
-      if (post?.groupId) {
-        queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
-      }
-    },
-  });
-
-  const reactionMutation = useMutation({
-    mutationFn: (type: string) => toggleReaction(postId, { type }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['post', postId] });
-      queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
-      if (post?.groupId) {
-        queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
-      }
-    },
-  });
-
   const reactionAnyMutation = useMutation({
     mutationFn: (emoji: string) => toggleReactionAny(postId, emoji),
+    // Optimistic: flip the heart/emoji instantly instead of waiting on the
+    // network round-trip. Toggling off (tapping the same reaction again)
+    // clears it; toggling to a different reaction replaces it and bumps
+    // the count only when there wasn't one already.
+    onMutate: async (emoji: string) => {
+      await queryClient.cancelQueries({ queryKey: ['post', postId] });
+      const previous = queryClient.getQueryData<PostDetail>(['post', postId]);
+      if (previous) {
+        const wasSame = previous.viewerReaction === emoji;
+        queryClient.setQueryData<PostDetail>(['post', postId], {
+          ...previous,
+          viewerReaction: wasSame ? null : emoji,
+          reactionCount: previous.reactionCount + (wasSame ? -1 : previous.viewerReaction ? 0 : 1),
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _emoji, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['post', postId], context.previous);
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
       queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
+      if (post?.groupId) {
+        queryClient.invalidateQueries({ queryKey: ['group', post.groupId, 'posts'] });
+      }
     },
   });
 
@@ -224,7 +221,7 @@ export default function HiddenDiscussionScreen() {
                 <PostHeader post={post} countdownText={countdownText} />
                 <EngagementBar
                   post={post}
-                  onLike={() => reactionMutation.mutate('like')}
+                  onLike={() => reactionAnyMutation.mutate('like')}
                   onYesNo={(v) => yesNoMutation.mutate(v)}
                   onRate={(n) => ratingMutation.mutate(n)}
                   onReact={(emoji) => reactionAnyMutation.mutate(emoji)}
@@ -275,44 +272,23 @@ export default function HiddenDiscussionScreen() {
                     ))
                   )}
 
-                  <ReplyComposer
-                    value={commentDraft}
-                    onChangeText={setCommentDraft}
-                    placeholder="Comment on this discussion…"
-                    accessibilityLabel="Comment"
-                    isPending={commentMutation.isPending}
-                    isError={commentMutation.isError}
-                    errorText="Couldn't post the comment. Try again."
-                    onSend={() => {
-                      const trimmed = commentDraft.trim();
-                      if (!trimmed) return;
-                      commentMutation.mutate(trimmed, { onSuccess: () => setCommentDraft('') });
-                    }}
-                  />
+                  {(post.allowedInteractions ?? []).includes('textComment') ? (
+                    <ReplyComposer
+                      value={commentDraft}
+                      onChangeText={setCommentDraft}
+                      placeholder="Comment on this discussion…"
+                      accessibilityLabel="Comment"
+                      isPending={commentMutation.isPending}
+                      isError={commentMutation.isError}
+                      errorText="Couldn't post the comment. Try again."
+                      onSend={() => {
+                        const trimmed = commentDraft.trim();
+                        if (!trimmed) return;
+                        commentMutation.mutate(trimmed, { onSuccess: () => setCommentDraft('') });
+                      }}
+                    />
+                  ) : null}
                 </ThreadSection>
-
-                <View className="pt-5 mt-1">
-                  <Text variant="title" tone="primary" className="mb-0.5">
-                    Submit your response
-                  </Text>
-                  <Text variant="caption" tone="tertiary" className="mb-3">
-                    Visible to others after the timer ends.
-                  </Text>
-                  <ReplyComposer
-                    value={draft}
-                    onChangeText={setDraft}
-                    placeholder="Write your response…"
-                    accessibilityLabel="Your response"
-                    isPending={submitMutation.isPending}
-                    isError={submitMutation.isError}
-                    errorText="Couldn't send your response. Try again."
-                    onSend={() => {
-                      const trimmed = draft.trim();
-                      if (!trimmed) return;
-                      submitMutation.mutate(trimmed);
-                    }}
-                  />
-                </View>
               </>
             ) : null}
           </ScrollView>
@@ -333,8 +309,8 @@ function PostHeader({ post, countdownText }: { post: PostDetail; countdownText: 
       {/* Author row */}
       <View className="flex-row items-center mb-2.5">
         <View
-          className="items-center justify-center mr-2.5"
-          style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: radius.full, backgroundColor: avatarColor }}
+          className="items-center justify-center"
+          style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: radius.full, backgroundColor: avatarColor, marginRight: 8 }}
         >
           <Text variant="metaStrong" tone="primary">
             {initials}
@@ -348,7 +324,7 @@ function PostHeader({ post, countdownText }: { post: PostDetail; countdownText: 
             {formatRelativeTime(post.createdAt)}
           </Text>
         </View>
-        <View className="px-2.5 py-1 rounded-full ml-2" style={{ backgroundColor: SUBTLE_PILL_BG }}>
+        <View className="rounded-full ml-2" style={{ backgroundColor: SUBTLE_PILL_BG, padding: 4 }}>
           <Text
             variant="caption"
             bold
@@ -365,15 +341,11 @@ function PostHeader({ post, countdownText }: { post: PostDetail; countdownText: 
       </View>
 
       {/* Caption */}
-      <Text variant="h2" tone="primary" className="mb-2">
-        {post.caption}
-      </Text>
-
-      {!isRevealed ? (
-        <Text variant="meta" tone="tertiary" className="mb-2.5">
-          Responses are hidden until the timer ends. Only your own reply is visible to you.
+      <View style={{ minHeight: 64, marginTop: 8 }} className="mb-2">
+        <Text variant="body" tone="primary">
+          {post.caption}
         </Text>
-      ) : null}
+      </View>
 
       {/* Media (single full-width preview, 16:9) */}
       {firstMedia ? <MediaPreview item={firstMedia} /> : null}
@@ -408,21 +380,8 @@ function EngagementBar({
   return (
     <View
       className="flex-row items-center flex-wrap gap-2 py-3 mb-1"
-      style={{ borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
+      style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
     >
-      {allowed.includes('like') ? (
-        <Pressable
-          onPress={onLike}
-          accessibilityRole="button"
-          accessibilityLabel="Like"
-          className="flex-row items-center px-3 py-1.5 rounded-full border active:opacity-80"
-          style={{ backgroundColor: post.viewerReaction === 'like' ? colors.brand.primary : colors.surface.bg, borderColor: colors.brand.primary }}
-        >
-          <Ionicons name={post.viewerReaction === 'like' ? 'heart' : 'heart-outline'} size={15} color={post.viewerReaction === 'like' ? colors.brand.onPrimary : colors.brand.primary} />
-          <Text variant="caption" bold tone={post.viewerReaction === 'like' ? 'onDark' : 'primary'} className="ml-1">Like</Text>
-        </Pressable>
-      ) : null}
-
       {allowed.includes('yesNo') ? (
         <View className="flex-row rounded-full overflow-hidden border" style={{ borderColor: colors.brand.primary }}>
           {(['yes', 'no'] as const).map((v) => {
@@ -463,6 +422,25 @@ function EngagementBar({
         </View>
       ) : null}
 
+      {/* Spacer pushes Like + Reaction to the right edge. */}
+      <View className="flex-1" />
+
+      {allowed.includes('like') ? (
+        <Pressable
+          onPress={onLike}
+          accessibilityRole="button"
+          accessibilityLabel="Like"
+          className="items-center justify-center active:opacity-70"
+          hitSlop={8}
+        >
+          <Ionicons
+            name={post.viewerReaction === 'like' ? 'heart' : 'heart-outline'}
+            size={26}
+            color={post.viewerReaction === 'like' ? colors.semantic.danger : colors.text.primary}
+          />
+        </Pressable>
+      ) : null}
+
       {allowed.includes('reaction') ? (
         <ReactionPicker viewerReaction={post.viewerReaction} reactionCount={post.reactionCount} onReact={onReact} />
       ) : null}
@@ -487,34 +465,53 @@ function ReactionPicker({
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
         accessibilityLabel="React with emoji"
-        className="flex-row items-center px-3 py-1.5 rounded-full border active:opacity-80"
-        style={{ backgroundColor: viewerReaction ? SUBTLE_PILL_BG : colors.surface.bg, borderColor: colors.brand.primary }}
+        className="flex-row items-center active:opacity-70"
+        hitSlop={8}
       >
-        <Text style={{ fontSize: 15 }}>{viewerReaction ?? '🙂'}</Text>
+        <Text style={{ fontSize: 24, lineHeight: 30 }}>{viewerReaction ?? '🙂'}</Text>
         {reactionCount > 0 ? (
           <Text variant="caption" bold tone="primary" className="ml-1">{reactionCount}</Text>
         ) : null}
       </Pressable>
       {open ? (
-        <View
-          className="flex-row flex-wrap gap-1.5 p-2 mt-2 rounded-lg border"
-          style={{ backgroundColor: colors.surface.bg, borderColor: BORDER, borderRadius: radius.md }}
-        >
-          {EMOJI_PICKER.map((emoji) => (
-            <Pressable
-              key={emoji}
-              onPress={() => {
-                onReact(emoji);
-                setOpen(false);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel={`React with ${emoji}`}
-              className="w-9 h-9 rounded-md items-center justify-center active:opacity-70"
-            >
-              <Text style={{ fontSize: 18 }}>{emoji}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <>
+          {/* Backdrop — tap outside to dismiss without picking. */}
+          <Pressable
+            onPress={() => setOpen(false)}
+            accessibilityLabel="Dismiss emoji picker"
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View
+            className="flex-row flex-wrap gap-1.5 p-2 rounded-lg border"
+            style={{
+              position: 'absolute',
+              bottom: '100%',
+              right: 0,
+              marginBottom: 8,
+              width: 220,
+              backgroundColor: colors.surface.bg,
+              borderColor: BORDER,
+              borderRadius: radius.md,
+              ...elevation[2],
+              zIndex: 20,
+            }}
+          >
+            {EMOJI_PICKER.map((emoji) => (
+              <Pressable
+                key={emoji}
+                onPress={() => {
+                  onReact(emoji);
+                  setOpen(false);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`React with ${emoji}`}
+                className="w-9 h-9 rounded-md items-center justify-center active:opacity-70"
+              >
+                <Text style={{ fontSize: 18, lineHeight: 22 }}>{emoji}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </>
       ) : null}
     </View>
   );
@@ -623,12 +620,6 @@ function ReplyComposer({
           <Pressable accessibilityRole="button" accessibilityLabel="Attach image" className="w-8 h-8 items-center justify-center active:opacity-70">
             <MaterialCommunityIcons name="image-outline" size={20} color={ICON_MUTED} />
           </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Attach video" className="w-8 h-8 items-center justify-center active:opacity-70">
-            <MaterialCommunityIcons name="video-outline" size={20} color={ICON_MUTED} />
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Attach audio" className="w-8 h-8 items-center justify-center active:opacity-70">
-            <MaterialCommunityIcons name="music-note-outline" size={20} color={ICON_MUTED} />
-          </Pressable>
         </View>
 
         <Pressable
@@ -666,7 +657,13 @@ function MediaPreview({ item }: { item: PostMediaItem }) {
       style={{ backgroundColor: colors.surface.bg, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
     >
       {isImage ? (
-        <Image source={{ uri: item.url }} className="w-full h-full" resizeMode="cover" />
+        <Image
+          source={{ uri: item.url }}
+          className="w-full h-full"
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={200}
+        />
       ) : (
         <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.surface.bg }}>
           <MaterialCommunityIcons name="play-circle-outline" size={36} color={colors.brand.primary} />
@@ -717,11 +714,3 @@ function authorInitials(name: string | null | undefined): string {
   ).toUpperCase();
 }
 
-function avatarColorFor(seed: string): string {
-  const palette = ['#0B49FA', '#7A4DFF', '#22C7B7', '#FFB020', '#FF3D7F'];
-  let h = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return palette[h % palette.length] as string;
-}
