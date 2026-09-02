@@ -698,7 +698,21 @@ export async function listComments(
 
   const rows = await prisma.comment.findMany({
     where: { postId },
-    include: { author: { select: { name: true } } },
+    include: {
+      author: { select: { name: true } },
+      // The quoted comment is embedded rather than left to the client to
+      // resolve: a reply whose parent sits on an unloaded page would
+      // otherwise render an empty quote. One join here beats the client
+      // guessing.
+      replyTo: {
+        select: {
+          id: true,
+          body: true,
+          authorId: true,
+          author: { select: { name: true } },
+        },
+      },
+    },
     orderBy: { createdAt: 'asc' },
   });
 
@@ -711,6 +725,14 @@ export async function listComments(
       body: c.body,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
+      replyTo: c.replyTo
+        ? {
+            id: c.replyTo.id,
+            authorId: c.replyTo.authorId,
+            authorName: c.replyTo.author.name,
+            body: c.replyTo.body,
+          }
+        : null,
     }),
   );
 }
@@ -721,15 +743,38 @@ export async function listComments(
  * contract as submitResponse.
  */
 export async function createComment(input: CreateCommentInput): Promise<CommentItem> {
-  const { viewerId, postId, body } = input;
+  const { viewerId, postId, body, replyToId } = input;
 
   // Gate on membership; we deliberately do NOT gate on status — comments
   // are writable during the discussion phase, only the list is gated.
   const gate = await loadPostForCommentGate(viewerId, postId);
 
+  // A reply must quote a comment on THIS post. Without the postId check a
+  // caller could quote a comment from a post they can't even see, and the
+  // quoted body would then be served back to them through this thread.
+  if (replyToId) {
+    const parent = await prisma.comment.findFirst({
+      where: { id: replyToId, postId },
+      select: { id: true },
+    });
+    if (!parent) {
+      throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Replied-to comment not found on this post');
+    }
+  }
+
   const created = await prisma.comment.create({
-    data: { postId, authorId: viewerId, body },
-    include: { author: { select: { name: true } } },
+    data: { postId, authorId: viewerId, body, replyToId: replyToId ?? null },
+    include: {
+      author: { select: { name: true } },
+      replyTo: {
+        select: {
+          id: true,
+          body: true,
+          authorId: true,
+          author: { select: { name: true } },
+        },
+      },
+    },
   });
 
   logger.info(
@@ -750,6 +795,20 @@ export async function createComment(input: CreateCommentInput): Promise<CommentI
     }).catch((err) => logger.error({ err, postId }, 'failed to create comment notification'));
   }
 
+  // Whoever was replied to also gets told — unless they're the replier, or
+  // the post author who was already notified just above (one event, one
+  // notification). Same generic wording: no body, no identity.
+  const quotedAuthorId = created.replyTo?.authorId;
+  if (quotedAuthorId && quotedAuthorId !== viewerId && quotedAuthorId !== gate.authorId) {
+    void createNotification({
+      userId: quotedAuthorId,
+      type: 'comment',
+      title: 'New reply',
+      body: 'Someone replied to your comment.',
+      postId,
+    }).catch((err) => logger.error({ err, postId }, 'failed to create reply notification'));
+  }
+
   return {
     id: created.id,
     postId: created.postId,
@@ -758,6 +817,14 @@ export async function createComment(input: CreateCommentInput): Promise<CommentI
     body: created.body,
     createdAt: created.createdAt,
     updatedAt: created.updatedAt,
+    replyTo: created.replyTo
+      ? {
+          id: created.replyTo.id,
+          authorId: created.replyTo.authorId,
+          authorName: created.replyTo.author.name,
+          body: created.replyTo.body,
+        }
+      : null,
   };
 }
 

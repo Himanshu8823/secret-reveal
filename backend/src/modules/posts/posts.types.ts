@@ -159,6 +159,17 @@ export type ListPostsResult = {
 
 // --- Comments ---------------------------------------------------------------
 
+/**
+ * The comment a reply quotes. Only what the quote strip needs — enough to
+ * render the preview without a second fetch, and nothing more.
+ */
+export type CommentQuote = {
+  id: string;
+  authorId: string;
+  authorName: string | null;
+  body: string;
+};
+
 export type CommentItem = {
   id: string;
   postId: string;
@@ -167,12 +178,17 @@ export type CommentItem = {
   body: string;
   createdAt: Date;
   updatedAt: Date;
+  /** Null for a top-level comment, and also for a reply whose quoted
+   *  comment has since been deleted (the FK is ON DELETE SET NULL). */
+  replyTo: CommentQuote | null;
 };
 
 export type CreateCommentInput = {
   viewerId: string;
   postId: string;
   body: string;
+  /** Comment being replied to. Must belong to the same post. */
+  replyToId?: string | null;
 };
 
 export type ListCommentsResult = CommentItem[];

@@ -11,8 +11,19 @@ import { createPost } from '../../../src/api/posts.api';
 import { listUsers } from '../../../src/api/users.api';
 import { listMyGroups } from '../../../src/api/groups.api';
 import { useDiscardComposer } from '../../../src/features/composer/useDiscardComposer';
+import { PublishOverlay, type PublishPhase } from '../../../src/components/PublishOverlay';
 
 const GROUP_NAME_MAX = 60;
+
+/**
+ * How long the success tick stays up before we navigate away. Long enough
+ * to register as confirmation, short enough not to feel like a wait — on a
+ * fast network the request itself can finish in well under 200ms, and
+ * without this the overlay would flash by unread.
+ */
+const SUCCESS_HOLD_MS = 900;
+
+const holdSuccess = () => new Promise<void>((r) => setTimeout(r, SUCCESS_HOLD_MS));
 
 export default function CreateGroupsScreen() {
   const queryClient = useQueryClient();
@@ -39,6 +50,9 @@ export default function CreateGroupsScreen() {
   const [userSearch, setUserSearch] = useState('');
   const [groupSearch, setGroupSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Drives the publish overlay: spinner while the request runs, then a
+  // tick that is held briefly so the confirmation is actually seen.
+  const [publishPhase, setPublishPhase] = useState<PublishPhase>('idle');
 
   const usersQuery = useQuery({ queryKey: ['users', 'picker'], queryFn: () => listUsers({ limit: 50 }) });
   const groupsQuery = useQuery({ queryKey: ['groups', 'mine'], queryFn: () => listMyGroups() });
@@ -63,7 +77,6 @@ export default function CreateGroupsScreen() {
 
   const canPublishCreate = localGroupName.trim().length >= 1 && localGroupName.trim().length <= GROUP_NAME_MAX && invitees.length >= 1 && timerMinutes !== null && !submitting;
   const canPublishExisting = selectedExistingGroupId != null && timerMinutes !== null && !submitting;
-  const canPublish = activeTab === 'create' ? canPublishCreate : canPublishExisting;
 
   const onBack = () => router.back();
   const onClose = confirmDiscard;
@@ -82,6 +95,7 @@ export default function CreateGroupsScreen() {
       return;
     }
     setSubmitting(true);
+    setPublishPhase('publishing');
     try {
       const memberIds = invitees.map((i) => i.id);
       await createPost({
@@ -104,9 +118,13 @@ export default function CreateGroupsScreen() {
       queryClient.invalidateQueries({ queryKey: ['posts'] });
       queryClient.invalidateQueries({ queryKey: ['users', 'me', 'stats'] });
       reset();
-      dialog.show({ variant: 'success', title: 'Posted', message: 'Post published. If same members existed, it was posted to the existing group.', actions: [{ label: 'OK' }] });
+      // Confirmation now lives in the overlay, not a dialog the user has to
+      // dismiss — they published, so an extra OK tap is friction.
+      setPublishPhase('published');
+      await holdSuccess();
       router.replace('/(app)');
     } catch (e) {
+      setPublishPhase('idle');
       dialog.show({ variant: 'danger', title: 'Publish failed', message: e instanceof Error ? e.message : 'Could not publish', actions: [{ label: 'OK' }] });
     } finally {
       setSubmitting(false);
@@ -124,6 +142,7 @@ export default function CreateGroupsScreen() {
       return;
     }
     setSubmitting(true);
+    setPublishPhase('publishing');
     try {
       await createPost({
         groupId: selectedExistingGroupId,
@@ -143,8 +162,11 @@ export default function CreateGroupsScreen() {
       queryClient.invalidateQueries({ queryKey: ['group', selectedExistingGroupId, 'posts'] });
       queryClient.invalidateQueries({ queryKey: ['users', 'me', 'stats'] });
       reset();
+      setPublishPhase('published');
+      await holdSuccess();
       router.replace('/(app)');
     } catch (e) {
+      setPublishPhase('idle');
       dialog.show({ variant: 'danger', title: 'Publish failed', message: e instanceof Error ? e.message : 'Could not publish', actions: [{ label: 'OK' }] });
     } finally {
       setSubmitting(false);
@@ -262,6 +284,8 @@ export default function CreateGroupsScreen() {
           </View>
         </View>
       )}
+
+      <PublishOverlay phase={publishPhase} />
     </SafeAreaView>
   );
 }

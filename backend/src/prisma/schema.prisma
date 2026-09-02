@@ -351,14 +351,22 @@ model Comment {
   postId    String   @db.Uuid
   authorId  String   @db.Uuid
   body      String   @db.VarChar(1000)
+  // The comment this one replies to, WhatsApp-style. Null for a top-level
+  // comment. onDelete: SetNull rather than Cascade — deleting a quoted
+  // comment must not take its replies with it; they lose the quote and
+  // stay in the thread as ordinary comments.
+  replyToId String?  @db.Uuid
   createdAt DateTime @default(now()) @db.Timestamptz(6)
   updatedAt DateTime @updatedAt          @db.Timestamptz(6)
   deletedAt DateTime?
 
-  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  post    Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author  User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replyTo Comment?  @relation("CommentReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies Comment[] @relation("CommentReply")
 
   @@index([postId, createdAt])
   @@index([authorId, createdAt(sort: Desc)])
+  @@index([replyToId])
   @@map("comments")
 }

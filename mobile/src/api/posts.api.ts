@@ -277,7 +277,19 @@ export async function getMyVote(postId: string) {
 
 // --- Comments (meta-discussion, never anonymous) --------------------------
 
-export type CreateCommentInput = { body: string };
+export type CreateCommentInput = {
+  body: string;
+  /** Comment being replied to. Must be on the same post. */
+  replyToId?: string | null;
+};
+
+/** The comment a reply quotes — everything the quote strip renders. */
+export type CommentQuote = {
+  id: string;
+  authorId: string;
+  authorName: string | null;
+  body: string;
+};
 
 export type CommentItem = {
   id: string;
@@ -287,6 +299,9 @@ export type CommentItem = {
   body: string;
   createdAt: string;
   updatedAt: string;
+  /** Null for a top-level comment, and for a reply whose quoted comment
+   *  was deleted. */
+  replyTo: CommentQuote | null;
 };
 
 export async function createComment(

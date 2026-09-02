@@ -217,6 +217,8 @@ export const createCommentSchema = z.object({
         .min(1, 'Comment body is required')
         .max(1000, 'Comment must be at most 1000 characters'),
     ),
+  /** Comment being replied to. The service checks it belongs to this post. */
+  replyToId: z.string().uuid('replyToId must be a UUID').optional().nullable(),
 });
 
 export type CreateCommentBody = z.infer<typeof createCommentSchema>;

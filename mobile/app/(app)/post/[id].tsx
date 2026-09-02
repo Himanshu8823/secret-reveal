@@ -32,6 +32,7 @@ import {
   votePoll,
   getPollResults,
   type CommentItem,
+  type CommentQuote,
   type PostDetail,
 } from '../../../src/api/posts.api';
 import { RATING_SCALE } from '../../../src/store/composerStore';
@@ -54,6 +55,12 @@ import { RATING_SCALE } from '../../../src/store/composerStore';
 
 const AVATAR_SIZE = 36;
 const THREAD_AVATAR_SIZE = 30;
+/** Indent for a reply row. Matches the parent's avatar width plus its gap,
+ *  so a reply's avatar lines up under the parent's text. */
+const REPLY_INDENT = 44;
+/** Replies use a smaller avatar so a thread reads as parent-then-children
+ *  at a glance rather than as a list of equals. */
+const REPLY_AVATAR_SIZE = 24;
 
 const BORDER = colors.border.DEFAULT;
 const MUTED_BG = colors.surface.muted;
@@ -248,7 +255,8 @@ export default function HiddenDiscussionScreen() {
   });
 
   const commentMutation = useMutation({
-    mutationFn: (body: string) => createCommentApi(postId, { body }),
+    mutationFn: (input: { body: string; replyToId?: string | null }) =>
+      createCommentApi(postId, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
       queryClient.invalidateQueries({ queryKey: ['post', postId, 'comments'] });
@@ -260,6 +268,19 @@ export default function HiddenDiscussionScreen() {
   });
 
   const [commentDraft, setCommentDraft] = useState('');
+  // The comment the draft is replying to, or null for a top-level comment.
+  // Holding the whole quote (not just an id) lets the composer strip render
+  // without hunting through the list for the row again.
+  const [replyingTo, setReplyingTo] = useState<CommentQuote | null>(null);
+
+  const startReply = useCallback((c: CommentItem) => {
+    setReplyingTo({
+      id: c.id,
+      authorId: c.authorId,
+      authorName: c.authorName,
+      body: c.body,
+    });
+  }, []);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [videoUri, setVideoUri] = useState<string | null>(null);
 
@@ -380,23 +401,79 @@ export default function HiddenDiscussionScreen() {
                         No comments yet — meta-discussion only, never anonymous.
                       </Text>
                     ) : (
-                      (commentsQuery.data ?? []).map((c: CommentItem) => (
-                        <ThreadRow key={c.id} name={c.authorName ?? 'Unknown'} body={c.body} createdAt={c.createdAt} />
+                      groupCommentThreads(commentsQuery.data ?? []).map((thread) => (
+                        <View key={thread.parent.id}>
+                          <ThreadRow
+                            name={thread.parent.authorName ?? 'Unknown'}
+                            body={thread.parent.body}
+                            createdAt={thread.parent.createdAt}
+                            onReply={() => startReply(thread.parent)}
+                            // The thread's own rule is drawn by its last
+                            // reply, so the parent only draws one when it
+                            // stands alone.
+                            showDivider={thread.replies.length === 0}
+                          />
+
+                          {/* Replies sit indented under their parent. The
+                              quote strip is dropped here — the nesting
+                              already says what is being replied to, and
+                              repeating it doubles every reply's height. */}
+                          {thread.replies.length > 0 ? (
+                            <View style={{ paddingLeft: REPLY_INDENT }}>
+                              {thread.replies.map((r, ri) => (
+                                <ThreadRow
+                                  key={r.id}
+                                  name={r.authorName ?? 'Unknown'}
+                                  body={r.body}
+                                  createdAt={r.createdAt}
+                                  // Only shown when replying to someone
+                                  // other than the thread's parent, so a
+                                  // deeper reply still says who it answers.
+                                  replyTo={
+                                    r.replyTo && r.replyTo.id !== thread.parent.id
+                                      ? r.replyTo
+                                      : null
+                                  }
+                                  compact
+                                  onReply={() => startReply(r)}
+                                  // Only the last reply closes the thread.
+                                  showDivider={ri === thread.replies.length - 1}
+                                />
+                              ))}
+                            </View>
+                          ) : null}
+                        </View>
                       ))
                     )}
 
                     <ReplyComposer
                       value={commentDraft}
                       onChangeText={setCommentDraft}
-                      placeholder="Comment on this discussion…"
+                      placeholder={
+                        replyingTo
+                          ? `Reply to ${replyingTo.authorName ?? 'Unknown'}…`
+                          : 'Comment on this discussion…'
+                      }
                       accessibilityLabel="Comment"
                       isPending={commentMutation.isPending}
                       isError={commentMutation.isError}
                       errorText="Couldn't post the comment. Try again."
+                      replyingTo={replyingTo}
+                      onCancelReply={() => setReplyingTo(null)}
                       onSend={() => {
                         const trimmed = commentDraft.trim();
                         if (!trimmed) return;
-                        commentMutation.mutate(trimmed, { onSuccess: () => setCommentDraft('') });
+                        commentMutation.mutate(
+                          { body: trimmed, replyToId: replyingTo?.id ?? null },
+                          {
+                            onSuccess: () => {
+                              setCommentDraft('');
+                              // Clear the quote too — leaving it armed would
+                              // silently attach it to the next comment.
+                              setReplyingTo(null);
+                            },
+                          },
+                        );
                       }}
                     />
                   </ThreadSection>
@@ -835,35 +912,107 @@ function ThreadSection({
 }
 
 /** One thread row: avatar, name, timestamp, wrapping body, lightweight action row. */
-function ThreadRow({ name, body, createdAt }: { name: string; body: string; createdAt: string }) {
+function ThreadRow({
+  name,
+  body,
+  createdAt,
+  replyTo,
+  onReply,
+  compact = false,
+  showDivider = true,
+}: {
+  name: string;
+  body: string;
+  createdAt: string;
+  replyTo?: CommentQuote | null;
+  /** Omitted for responses, which are anonymous and not repliable. */
+  onReply?: () => void;
+  /** Reply rows: smaller avatar and tighter spacing than a thread parent. */
+  compact?: boolean;
+  /** Off inside a thread — a rule between a comment and its own replies
+   *  reads as a separator between unrelated items, which is the opposite
+   *  of what the nesting is saying. Only the last row of a thread keeps it. */
+  showDivider?: boolean;
+}) {
   const initials = authorInitials(name);
+  const avatarSize = compact ? REPLY_AVATAR_SIZE : THREAD_AVATAR_SIZE;
   return (
-    <View className="flex-row items-start py-3" style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER }}>
+    <View
+      className={compact ? 'flex-row items-start py-2.5' : 'flex-row items-start py-3'}
+      style={
+        showDivider
+          ? { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER }
+          : undefined
+      }
+    >
+      {/* marginRight lives in the inline style, not a className: NativeWind's
+          cssInterop rewrites className into this same style prop, so a
+          class-based margin next to an inline style gets dropped. */}
       <View
-        className="items-center justify-center mr-2.5"
-        style={{ width: THREAD_AVATAR_SIZE, height: THREAD_AVATAR_SIZE, borderRadius: radius.full, backgroundColor: SUBTLE_PILL_BG }}
+        className="items-center justify-center"
+        style={{
+          width: avatarSize,
+          height: avatarSize,
+          borderRadius: radius.full,
+          backgroundColor: SUBTLE_PILL_BG,
+          marginRight: compact ? 10 : 14,
+        }}
       >
-        <Text variant="caption" bold tone="primary">
+        <Text variant={compact ? 'meta' : 'caption'} bold tone="primary">
           {initials}
         </Text>
       </View>
       <View className="flex-1 min-w-0">
         <View className="flex-row items-center flex-wrap">
-          <Text variant="bodyStrong" tone="primary" numberOfLines={1}>
+          <Text
+            variant={compact ? 'metaStrong' : 'bodyStrong'}
+            tone="primary"
+            numberOfLines={1}
+          >
             {name}
           </Text>
           <Text variant="meta" tone="tertiary" className="ml-2">
             {formatRelativeTime(createdAt)}
           </Text>
         </View>
-        <Text variant="body" tone="primary" className="mt-1">
+
+        {/* Quoted comment, WhatsApp-style: an accent bar on the leading
+            edge, the quoted author, and a clipped preview of their text. */}
+        {replyTo ? (
+          <View
+            className="mt-1.5 rounded-md bg-surface-muted"
+            style={{
+              borderLeftWidth: 3,
+              borderLeftColor: colors.brand.primary,
+              paddingLeft: 12,
+              paddingRight: 10,
+              paddingVertical: 8,
+            }}
+          >
+            <Text variant="caption" bold tone="link" numberOfLines={1}>
+              {replyTo.authorName ?? 'Unknown'}
+            </Text>
+            <Text variant="caption" tone="secondary" numberOfLines={2} className="mt-0.5">
+              {replyTo.body}
+            </Text>
+          </View>
+        ) : null}
+
+        <Text variant={compact ? 'meta' : 'body'} tone="primary" className="mt-1">
           {body}
         </Text>
-        <View className="flex-row items-center mt-1.5">
-          <Text variant="caption" tone="secondary">Like</Text>
-          <Text variant="caption" tone="tertiary" className="mx-1.5">·</Text>
-          <Text variant="caption" tone="secondary">Reply</Text>
-        </View>
+
+        {onReply ? (
+          <Pressable
+            onPress={onReply}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Reply to ${name}`}
+            className="mt-1.5 self-start active:opacity-60"
+          >
+            <Text variant="caption" bold tone="secondary">Reply</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -879,6 +1028,8 @@ function ReplyComposer({
   isError,
   errorText,
   onSend,
+  replyingTo,
+  onCancelReply,
 }: {
   value: string;
   onChangeText: (t: string) => void;
@@ -888,9 +1039,50 @@ function ReplyComposer({
   isError: boolean;
   errorText: string;
   onSend: () => void;
+  /** When set, the composer shows the quote strip above the input. */
+  replyingTo?: CommentQuote | null;
+  onCancelReply?: () => void;
 }) {
+  // marginTop goes in the inline style, not a className — cssInterop
+  // rewrites className into this same style prop and would drop it.
   return (
-    <View className="rounded-xl p-3" style={{ backgroundColor: MUTED_BG, borderRadius: radius.md }}>
+    <View
+      className="rounded-xl p-3"
+      style={{ backgroundColor: MUTED_BG, borderRadius: radius.md, marginTop: 12 }}
+    >
+      {/* Reply preview — the same strip the sent reply will carry, so what
+          you see before sending matches what lands in the thread. */}
+      {replyingTo ? (
+        <View
+          className="flex-row items-center rounded-md bg-surface mb-2"
+          style={{
+            borderLeftWidth: 3,
+            borderLeftColor: colors.brand.primary,
+            paddingLeft: 12,
+            paddingRight: 10,
+            paddingVertical: 8,
+          }}
+        >
+          <View className="flex-1 min-w-0">
+            <Text variant="caption" bold tone="link" numberOfLines={1}>
+              {replyingTo.authorName ?? 'Unknown'}
+            </Text>
+            <Text variant="caption" tone="secondary" numberOfLines={1} className="mt-0.5">
+              {replyingTo.body}
+            </Text>
+          </View>
+          <Pressable
+            onPress={onCancelReply}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel reply"
+            className="w-7 h-7 ml-2 items-center justify-center rounded-full active:opacity-60"
+          >
+            <Ionicons name="close" size={16} color={colors.text.secondary} />
+          </Pressable>
+        </View>
+      ) : null}
+
       <TextInput
         value={value}
         onChangeText={onChangeText}
@@ -963,6 +1155,66 @@ function formatRelativeTime(iso: string): string {
   const diffD = Math.floor(diffH / 24);
   if (diffD < 7) return `${diffD}d ago`;
   return '';
+}
+
+/**
+ * Group a flat comment list into Instagram/LinkedIn-style threads: each
+ * top-level comment followed by its replies.
+ *
+ * Nesting is deliberately capped at one level. A reply to a reply attaches
+ * to the same top-level thread rather than indenting further — unbounded
+ * nesting turns into an unreadable staircase on a phone, and it is what
+ * Instagram, LinkedIn and YouTube all settle on.
+ *
+ * A reply whose parent is missing (deleted, so `replyToId` was nulled, or
+ * simply not in this page) is promoted to top level instead of being
+ * dropped — losing someone's comment because its parent went away would be
+ * worse than showing it unattached.
+ */
+function groupCommentThreads(
+  comments: CommentItem[],
+): Array<{ parent: CommentItem; replies: CommentItem[] }> {
+  const byId = new Map(comments.map((c) => [c.id, c]));
+
+  /** Walk up to the thread root, so a reply-to-a-reply lands in the right
+   *  thread. Guarded against a cycle that bad data could introduce. */
+  const rootIdOf = (c: CommentItem): string => {
+    let current = c;
+    const seen = new Set<string>([c.id]);
+    while (current.replyTo) {
+      const parent = byId.get(current.replyTo.id);
+      if (!parent || seen.has(parent.id)) break;
+      seen.add(parent.id);
+      current = parent;
+    }
+    return current.id;
+  };
+
+  const threads: Array<{ parent: CommentItem; replies: CommentItem[] }> = [];
+  const indexById = new Map<string, number>();
+
+  // One pass in server order (oldest first) keeps both the thread order and
+  // the replies inside each thread chronological.
+  for (const c of comments) {
+    const isTopLevel = !c.replyTo || !byId.has(c.replyTo.id);
+    if (isTopLevel) {
+      indexById.set(c.id, threads.length);
+      threads.push({ parent: c, replies: [] });
+      continue;
+    }
+    const rootId = rootIdOf(c);
+    const idx = indexById.get(rootId);
+    if (idx === undefined) {
+      // Root not seen yet — only possible with out-of-order data. Treat it
+      // as its own thread rather than dropping the comment.
+      indexById.set(c.id, threads.length);
+      threads.push({ parent: c, replies: [] });
+      continue;
+    }
+    threads[idx]!.replies.push(c);
+  }
+
+  return threads;
 }
 
 function authorInitials(name: string | null | undefined): string {

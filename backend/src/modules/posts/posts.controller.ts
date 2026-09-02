@@ -149,6 +149,7 @@ export async function postComment(req: Request, res: Response, next: NextFunctio
       viewerId: user.id,
       postId: id,
       body: body.body,
+      replyToId: body.replyToId,
     });
     res.status(201).json({ success: true, data: result });
   } catch (err) {

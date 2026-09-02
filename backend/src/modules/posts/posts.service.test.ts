@@ -33,6 +33,7 @@ vi.mock('../../config/db.js', () => ({
     },
     comment: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
     },
     rating: {
@@ -129,6 +130,7 @@ const mockPrisma = prisma as unknown as {
   };
   comment: {
     findMany: ReturnType<typeof vi.fn>;
+    findFirst: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
   };
   rating: {
@@ -1027,6 +1029,7 @@ describe('createComment', () => {
       createdAt: new Date('2026-01-01T00:00:00Z'),
       updatedAt: new Date('2026-01-01T00:00:00Z'),
       author: { name: 'A' },
+      replyTo: null,
     });
 
     const result = await createComment({
@@ -1036,10 +1039,78 @@ describe('createComment', () => {
     });
 
     expect(mockPrisma.comment.create).toHaveBeenCalledWith({
-      data: { postId: 'post-1', authorId: 'user-1', body: 'my comment' },
-      include: { author: { select: { name: true } } },
+      data: { postId: 'post-1', authorId: 'user-1', body: 'my comment', replyToId: null },
+      include: {
+        author: { select: { name: true } },
+        replyTo: {
+          select: {
+            id: true,
+            body: true,
+            authorId: true,
+            author: { select: { name: true } },
+          },
+        },
+      },
     });
     expect(result.body).toBe('my comment');
+    expect(result.replyTo).toBeNull();
+  });
+
+  it('rejects a reply whose quoted comment belongs to a different post', async () => {
+    mockPrisma.post.findUnique.mockResolvedValue({
+      id: 'post-1',
+      groupId: 'group-1',
+      status: 'active',
+    });
+    mockPrisma.groupMember.findUnique.mockResolvedValue({ groupId: 'group-1' });
+    // The quoted id exists somewhere, but not on this post — the lookup is
+    // scoped by postId, so it comes back empty.
+    mockPrisma.comment.findFirst.mockResolvedValue(null);
+
+    await expect(
+      createComment({
+        viewerId: 'user-1',
+        postId: 'post-1',
+        body: 'sneaky reply',
+        replyToId: '11111111-1111-1111-1111-111111111111',
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(mockPrisma.comment.create).not.toHaveBeenCalled();
+  });
+
+  it('attaches the quoted comment when replying within the same post', async () => {
+    mockPrisma.post.findUnique.mockResolvedValue({
+      id: 'post-1',
+      groupId: 'group-1',
+      status: 'revealed',
+    });
+    mockPrisma.groupMember.findUnique.mockResolvedValue({ groupId: 'group-1' });
+    mockPrisma.comment.findFirst.mockResolvedValue({ id: 'c-parent' });
+    mockPrisma.comment.create.mockResolvedValue({
+      id: 'c-2',
+      postId: 'post-1',
+      authorId: 'user-1',
+      body: 'my reply',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+      author: { name: 'A' },
+      replyTo: { id: 'c-parent', body: 'original', authorId: 'user-2', author: { name: 'B' } },
+    });
+
+    const result = await createComment({
+      viewerId: 'user-1',
+      postId: 'post-1',
+      body: 'my reply',
+      replyToId: 'c-parent',
+    });
+
+    expect(result.replyTo).toEqual({
+      id: 'c-parent',
+      authorId: 'user-2',
+      authorName: 'B',
+      body: 'original',
+    });
   });
 });
 
