@@ -34,7 +34,7 @@ model User {
   reactions      Reaction[]
   comments       Comment[]
   media          Media[]
-  yesNoVotes     YesNoVote[]
+  pollVotes      PollVote[]
   ratings        Rating[]
   notifications  Notification[]
   postLikes      PostLike[]
@@ -144,8 +144,14 @@ model Post {
   groupId             String   @db.Uuid
   caption             String   @db.VarChar(2000)
   status              String   @default("active") @db.VarChar(20)  // active | revealed | deleted
-  allowedInteractions String[] @default([]) // e.g. ["yesNo","textComment","reaction","rating","like"]
-  ratingScale         Int?     // 5 or 10, required when rating ∈ allowedInteractions
+  allowedInteractions String[] @default([]) // e.g. ["poll","textComment","reaction","rating","like"]
+  // Kept nullable for rows written before the scale was fixed at 1-5.
+  // New posts never set it; the API reports every post as a 1-5 scale.
+  ratingScale         Int?
+  // True when the poll accepts several answers from one voter. Null for
+  // every non-poll post — the column only has meaning alongside a
+  // "poll" entry in allowedInteractions.
+  pollMultiSelect     Boolean?
   createdAt           DateTime @default(now()) @db.Timestamptz(6)
   updatedAt           DateTime @updatedAt          @db.Timestamptz(6)
   deletedAt           DateTime?
@@ -157,7 +163,8 @@ model Post {
   responses      Response[]
   reactions      Reaction[]
   comments       Comment[]
-  yesNoVotes     YesNoVote[]
+  pollOptions    PollOption[]
+  pollVotes      PollVote[]
   ratings        Rating[]
   postLikes      PostLike[]
 
@@ -254,19 +261,56 @@ model PostLike {
   @@map("post_likes")
 }
 
-model YesNoVote {
+/**
+ * One selectable answer on a poll post. The post's caption is the poll
+ * question — we do not store the question separately.
+ *
+ * `order` fixes the display sequence so options never shuffle between
+ * renders. Options are immutable once the post is created: editing them
+ * after votes exist would silently rewrite what people voted for.
+ */
+model PollOption {
+  id        String   @id @default(uuid()) @db.Uuid
+  postId    String   @db.Uuid
+  label     String   @db.VarChar(120)
+  order     Int
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  post  Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  votes PollVote[]
+
+  @@unique([postId, order])
+  @@index([postId])
+  @@map("poll_options")
+}
+
+/**
+ * One user's vote for one option.
+ *
+ * The primary key is (optionId, userId) rather than (postId, userId)
+ * because a multi-select poll lets one user hold several rows for the
+ * same post. Single-select is enforced in the service (delete the
+ * user's other rows for that post inside the vote transaction), not by
+ * the schema — the same table has to serve both modes.
+ *
+ * `postId` is denormalised alongside `optionId` so counting a post's
+ * votes and clearing a user's previous answers are single-index reads
+ * instead of joins through poll_options.
+ */
+model PollVote {
+  optionId  String   @db.Uuid
   postId    String   @db.Uuid
   userId    String   @db.Uuid
-  value     String   @db.VarChar(3) // "yes" | "no"
   createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  option PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  post   Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@id([postId, userId])
+  @@id([optionId, userId])
   @@index([postId])
-  @@map("yes_no_votes")
+  @@index([postId, userId])
+  @@map("poll_votes")
 }
 
 model Rating {

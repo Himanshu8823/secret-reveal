@@ -35,6 +35,32 @@ vi.mock('../../config/db.js', () => ({
       findMany: vi.fn(),
       create: vi.fn(),
     },
+    rating: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      upsert: vi.fn(),
+    },
+    postLike: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      delete: vi.fn(),
+      create: vi.fn(),
+    },
+    pollOption: {
+      findMany: vi.fn(),
+    },
+    pollVote: {
+      findMany: vi.fn(),
+      deleteMany: vi.fn(),
+      createMany: vi.fn(),
+      groupBy: vi.fn(),
+    },
+    // Reached through findOrCreateGroupByMembers when a post is created
+    // from a member set rather than an existing groupId.
+    groupInvite: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+    },
     discussionMeta: {
       update: vi.fn(),
     },
@@ -105,6 +131,30 @@ const mockPrisma = prisma as unknown as {
     findMany: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
   };
+  rating: {
+    findUnique: ReturnType<typeof vi.fn>;
+    findMany: ReturnType<typeof vi.fn>;
+    upsert: ReturnType<typeof vi.fn>;
+  };
+  postLike: {
+    findUnique: ReturnType<typeof vi.fn>;
+    findMany: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+  };
+  pollOption: {
+    findMany: ReturnType<typeof vi.fn>;
+  };
+  pollVote: {
+    findMany: ReturnType<typeof vi.fn>;
+    deleteMany: ReturnType<typeof vi.fn>;
+    createMany: ReturnType<typeof vi.fn>;
+    groupBy: ReturnType<typeof vi.fn>;
+  };
+  groupInvite: {
+    findUnique: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+  };
   discussionMeta: {
     update: ReturnType<typeof vi.fn>;
   };
@@ -117,6 +167,15 @@ beforeEach(() => {
     async (cb: (tx: typeof prisma) => Promise<unknown>) =>
       cb(prisma as unknown as typeof prisma),
   );
+  // Viewer-scoped lookups that every getPost/listPosts call makes. Tests
+  // that care about these override them; the rest just need them not to
+  // be undefined.
+  mockPrisma.pollVote.findMany.mockResolvedValue([]);
+  mockPrisma.postLike.findMany.mockResolvedValue([]);
+  mockPrisma.postLike.findUnique.mockResolvedValue(null);
+  mockPrisma.rating.findUnique.mockResolvedValue(null);
+  // No pending invite by default — the member-set path then creates one.
+  mockPrisma.groupInvite.findUnique.mockResolvedValue(null);
 });
 
 describe('createPost', () => {

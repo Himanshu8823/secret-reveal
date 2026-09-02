@@ -4,6 +4,7 @@ import { cacheDel, cacheDelPattern, cacheGetOrSet } from '../../lib/cache.js';
 import { logger } from '../../lib/logger.js';
 import { findOrCreateGroupByMembers } from '../groups/groups.service.js';
 import { createNotification } from '../notifications/notifications.service.js';
+import { RATING_SCALE } from './posts.validation.js';
 import type {
   CommentItem,
   CreateCommentInput,
@@ -65,7 +66,20 @@ import type {
  * fails loudly instead of silently picking one.
  */
 export async function createPost(input: CreatePostInput): Promise<CreatePostResult> {
-  const { authorId, groupId, memberIds, caption, mediaIds, timerMinutes, allowedInteractions, ratingScale } = input;
+  const {
+    authorId,
+    groupId,
+    memberIds,
+    caption,
+    mediaIds,
+    timerMinutes,
+    allowedInteractions,
+    ratingScale,
+    pollOptions,
+    pollMultiSelect,
+  } = input;
+
+  const isPoll = (allowedInteractions ?? []).includes('poll');
 
   if (Boolean(groupId) === Boolean(memberIds && memberIds.length > 0)) {
     throw new AppError(
@@ -135,9 +149,24 @@ export async function createPost(input: CreatePostInput): Promise<CreatePostResu
         status: 'active',
         allowedInteractions: allowedInteractions ?? [],
         ratingScale: ratingScale ?? null,
+        // Only set alongside a poll; null everywhere else so the column
+        // never implies a mode a non-poll post doesn't have.
+        pollMultiSelect: isPoll ? (pollMultiSelect ?? false) : null,
         media: {
           create: mediaIds.map((mediaId, idx) => ({ mediaId, order: idx })),
         },
+        // Options are written in the same transaction as the post: a poll
+        // that exists without its answers is not a usable post.
+        ...(isPoll
+          ? {
+              pollOptions: {
+                create: (pollOptions ?? []).map((label, idx) => ({
+                  label,
+                  order: idx,
+                })),
+              },
+            }
+          : {}),
         discussionMeta: {
           create: { timerMinutes, revealEndsAt },
         },
@@ -145,6 +174,7 @@ export async function createPost(input: CreatePostInput): Promise<CreatePostResu
       include: {
         media: { include: { media: true }, orderBy: { order: 'asc' } },
         discussionMeta: true,
+        pollOptions: { orderBy: { order: 'asc' } },
       },
     });
 
@@ -242,14 +272,16 @@ async function loadPostFromDb(viewerId: string, postId: string): Promise<PostDet
     throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member of this group');
   }
 
-  const [viewerReactionRow, viewerYesNoRow, viewerRatingRow, viewerLikeRow] = await Promise.all([
+  const [viewerReactionRow, viewerPollRows, viewerRatingRow, viewerLikeRow] = await Promise.all([
     prisma.reaction.findUnique({
       where: { postId_userId: { postId, userId: viewerId } },
       select: { type: true },
     }),
-    prisma.yesNoVote.findUnique({
-      where: { postId_userId: { postId, userId: viewerId } },
-      select: { value: true },
+    // The viewer's own selection is safe to return before reveal — it is
+    // their own answer. Only the tallies are withheld (getPollResults).
+    prisma.pollVote.findMany({
+      where: { postId, userId: viewerId },
+      select: { optionId: true },
     }),
     prisma.rating.findUnique({
       where: { postId_userId: { postId, userId: viewerId } },
@@ -298,7 +330,7 @@ async function loadPostFromDb(viewerId: string, postId: string): Promise<PostDet
     likeCount: post._count.postLikes,
     viewerReaction: viewerReactionRow?.type ?? null,
     viewerLiked: viewerLikeRow != null,
-    viewerYesNoVote: viewerYesNoRow?.value ?? null,
+    viewerPollOptionIds: viewerPollRows.map((r) => r.optionId),
     viewerRating: viewerRatingRow?.value ?? null,
   };
 }
@@ -840,13 +872,20 @@ export async function revealDuePosts(now: Date = new Date()): Promise<string[]> 
 }
 
 // ---------------------------------------------------------------------------
-// YesNo / Rating / Reactions (any emoji)
+// Poll / Rating / Reactions (any emoji)
 // ---------------------------------------------------------------------------
 
 async function ensureInteractionAllowed(postId: string, viewerId: string, needed: string) {
   const post = await prisma.post.findUnique({
     where: { id: postId },
-    select: { id: true, groupId: true, status: true, allowedInteractions: true, ratingScale: true },
+    select: {
+      id: true,
+      groupId: true,
+      status: true,
+      allowedInteractions: true,
+      ratingScale: true,
+      pollMultiSelect: true,
+    },
   });
   if (!post) throw new AppError(404, ErrorCode.VALIDATION_FAILED, 'Post not found');
   const membership = await prisma.groupMember.findUnique({
@@ -861,27 +900,144 @@ async function ensureInteractionAllowed(postId: string, viewerId: string, needed
   return post;
 }
 
-export async function submitYesNoVote(input: { viewerId: string; postId: string; value: 'yes' | 'no' }) {
-  const { viewerId, postId, value } = input;
-  await ensureInteractionAllowed(postId, viewerId, 'yesNo');
-  // hidden gating still allows writing pre-reveal
-  const vote = await prisma.yesNoVote.upsert({
-    where: { postId_userId: { postId, userId: viewerId } },
-    create: { postId, userId: viewerId, value },
-    update: { value },
+/**
+ * Cast (or clear) the viewer's poll vote.
+ *
+ * `optionIds` is the viewer's complete answer, not a delta: whatever they
+ * had before is replaced. An empty array clears the vote. Writing the
+ * full set makes the operation idempotent — a retried request can't
+ * double-count, which a per-option toggle endpoint would have allowed.
+ *
+ * Like every other interaction, voting is permitted before reveal; it is
+ * only the *results* that stay hidden (see getPollResults).
+ */
+export async function submitPollVote(input: {
+  viewerId: string;
+  postId: string;
+  optionIds: string[];
+}) {
+  const { viewerId, postId, optionIds } = input;
+  const post = await ensureInteractionAllowed(postId, viewerId, 'poll');
+
+  const multiSelect = Boolean(
+    (post as unknown as { pollMultiSelect: boolean | null }).pollMultiSelect,
+  );
+  if (!multiSelect && optionIds.length > 1) {
+    throw new AppError(
+      400,
+      ErrorCode.VALIDATION_FAILED,
+      'This poll accepts only one answer',
+    );
+  }
+
+  // Duplicate ids would insert once but imply a bigger selection than the
+  // voter made; reject rather than silently collapsing them.
+  if (new Set(optionIds).size !== optionIds.length) {
+    throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Duplicate option ids');
+  }
+
+  // Every id must belong to THIS post — otherwise a caller could vote on
+  // another post's options through this one's id.
+  if (optionIds.length > 0) {
+    const owned = await prisma.pollOption.findMany({
+      where: { postId, id: { in: optionIds } },
+      select: { id: true },
+    });
+    if (owned.length !== optionIds.length) {
+      throw new AppError(400, ErrorCode.VALIDATION_FAILED, 'Unknown poll option');
+    }
+  }
+
+  // Replace-in-place: clearing and re-inserting in one transaction means a
+  // concurrent read never sees the voter as having no answer mid-write.
+  await prisma.$transaction(async (tx) => {
+    await tx.pollVote.deleteMany({ where: { postId, userId: viewerId } });
+    if (optionIds.length > 0) {
+      await tx.pollVote.createMany({
+        data: optionIds.map((optionId) => ({ optionId, postId, userId: viewerId })),
+      });
+    }
   });
+
   await cacheDel(`cache:post:${postId}:viewer:${viewerId}`);
   await cacheDelPattern(`cache:post:${postId}:votes:*`);
-  logger.info({ postId, viewerId, value }, 'yesNo vote');
-  return vote;
+  logger.info({ postId, viewerId, count: optionIds.length }, 'poll vote');
+  return { optionIds };
+}
+
+/**
+ * Poll tallies. Gated exactly like comments and responses: nothing is
+ * visible until the post reveals. Before then the viewer can see their
+ * OWN selection (they need it to render their choice) but no counts.
+ */
+export async function getPollResults(viewerId: string, postId: string) {
+  const post = await ensureInteractionAllowed(postId, viewerId, 'poll');
+
+  const options = await prisma.pollOption.findMany({
+    where: { postId },
+    orderBy: { order: 'asc' },
+    select: { id: true, label: true, order: true },
+  });
+
+  const mine = await prisma.pollVote.findMany({
+    where: { postId, userId: viewerId },
+    select: { optionId: true },
+  });
+  const myOptionIds = mine.map((m) => m.optionId);
+
+  // Pre-reveal: counts stay hidden, same rule as every other interaction.
+  if (post.status === 'active') {
+    return {
+      revealed: false,
+      multiSelect: Boolean(
+        (post as unknown as { pollMultiSelect: boolean | null }).pollMultiSelect,
+      ),
+      totalVoters: null,
+      options: options.map((o) => ({ ...o, votes: null })),
+      myOptionIds,
+    };
+  }
+
+  const grouped = await prisma.pollVote.groupBy({
+    by: ['optionId'],
+    where: { postId },
+    _count: { optionId: true },
+  });
+  const countByOption = new Map(grouped.map((g) => [g.optionId, g._count.optionId]));
+
+  // Distinct voters, not total rows — a multi-select poll has more rows
+  // than people, and a percentage over row count would exceed 100%.
+  const voters = await prisma.pollVote.findMany({
+    where: { postId },
+    select: { userId: true },
+    distinct: ['userId'],
+  });
+
+  return {
+    revealed: true,
+    multiSelect: Boolean(
+      (post as unknown as { pollMultiSelect: boolean | null }).pollMultiSelect,
+    ),
+    totalVoters: voters.length,
+    options: options.map((o) => ({ ...o, votes: countByOption.get(o.id) ?? 0 })),
+    myOptionIds,
+  };
 }
 
 export async function submitRating(input: { viewerId: string; postId: string; value: number }) {
   const { viewerId, postId, value } = input;
-  const post = await ensureInteractionAllowed(postId, viewerId, 'rating');
-  const scale = (post as unknown as { ratingScale: number | null }).ratingScale ?? 5;
-  if (value < 1 || value > scale) {
-    throw new AppError(400, ErrorCode.VALIDATION_FAILED, `Rating must be between 1 and ${scale}`);
+  // Membership + "rating is enabled here" gate; the returned row is no
+  // longer needed since the scale is fixed rather than read per-post.
+  await ensureInteractionAllowed(postId, viewerId, 'rating');
+  // Always 1-5, including on posts stored with the old ratingScale=10.
+  // The UI only ever draws 5 stars now, so honouring a stored 10 here
+  // would accept a value no client can produce or display.
+  if (value < 1 || value > RATING_SCALE) {
+    throw new AppError(
+      400,
+      ErrorCode.VALIDATION_FAILED,
+      `Rating must be between 1 and ${RATING_SCALE}`,
+    );
   }
   const rating = await prisma.rating.upsert({
     where: { postId_userId: { postId, userId: viewerId } },
@@ -944,12 +1100,15 @@ export async function getMyVote(viewerId: string, postId: string) {
     select: { groupId: true },
   });
   if (!membership) throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member');
-  const [yesNo, rating, reaction] = await Promise.all([
-    prisma.yesNoVote.findUnique({ where: { postId_userId: { postId, userId: viewerId } } }),
+  const [pollVotes, rating, reaction] = await Promise.all([
+    prisma.pollVote.findMany({
+      where: { postId, userId: viewerId },
+      select: { optionId: true },
+    }),
     prisma.rating.findUnique({ where: { postId_userId: { postId, userId: viewerId } } }),
     prisma.reaction.findUnique({ where: { postId_userId: { postId, userId: viewerId } } }),
   ]);
-  return { yesNo, rating, reaction };
+  return { pollOptionIds: pollVotes.map((v) => v.optionId), rating, reaction };
 }
 
 export async function listVotes(viewerId: string, postId: string) {
@@ -961,7 +1120,10 @@ export async function listVotes(viewerId: string, postId: string) {
   });
   if (!membership) throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member');
   if (post.status === 'active') throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'Votes are hidden until reveal');
-  return prisma.yesNoVote.findMany({ where: { postId }, orderBy: { createdAt: 'asc' } });
+  // Raw poll rows, post-reveal only. Callers that want tallies should use
+  // getPollResults instead — this stays row-level for parity with the
+  // other list* helpers.
+  return prisma.pollVote.findMany({ where: { postId }, orderBy: { createdAt: 'asc' } });
 }
 
 export async function listRatings(viewerId: string, postId: string) {

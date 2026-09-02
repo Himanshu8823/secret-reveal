@@ -29,10 +29,12 @@ import {
   ratePost,
   toggleLike,
   toggleReactionAny,
-  voteYesNo,
+  votePoll,
+  getPollResults,
   type CommentItem,
   type PostDetail,
 } from '../../../src/api/posts.api';
+import { RATING_SCALE } from '../../../src/store/composerStore';
 
 /**
  * Screen — Hidden Discussion, thread-style (Phase 4 redesign, plan §10).
@@ -195,16 +197,18 @@ export default function HiddenDiscussionScreen() {
     },
   });
 
-  const yesNoMutation = useMutation({
-    mutationFn: (value: 'yes' | 'no') => voteYesNo(postId, value),
+  const pollMutation = useMutation({
+    // The complete selection is sent every time, never a delta — that is
+    // what makes a retry safe (see votePoll).
+    mutationFn: (optionIds: string[]) => votePoll(postId, optionIds),
     // Paint the choice immediately; the server catches up behind it.
-    onMutate: async (value: 'yes' | 'no') => {
+    onMutate: async (optionIds: string[]) => {
       await queryClient.cancelQueries({ queryKey: ['post', postId] });
       const previous = queryClient.getQueryData<PostDetail>(['post', postId]);
       if (previous) {
         queryClient.setQueryData<PostDetail>(['post', postId], {
           ...previous,
-          viewerYesNoVote: value,
+          viewerPollOptionIds: optionIds,
         });
       }
       return { previous };
@@ -214,6 +218,9 @@ export default function HiddenDiscussionScreen() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['post', postId] });
+      // Tallies live in their own query — refresh them too, otherwise a
+      // revealed poll keeps showing the pre-vote counts.
+      queryClient.invalidateQueries({ queryKey: ['post', postId, 'poll'] });
     },
   });
 
@@ -306,10 +313,17 @@ export default function HiddenDiscussionScreen() {
             ) : post ? (
               <>
                 <PostHeader post={post} countdownText={countdownText} onOpenMedia={openMedia} />
+                {post.allowedInteractions?.includes('poll') ? (
+                  <PollBlock
+                    postId={postId}
+                    viewerOptionIds={post.viewerPollOptionIds ?? []}
+                    onVote={(ids) => pollMutation.mutate(ids)}
+                  />
+                ) : null}
+
                 <EngagementBar
                   post={post}
                   onLike={() => likeMutation.mutate()}
-                  onYesNo={(v) => yesNoMutation.mutate(v)}
                   onRate={(n) => ratingMutation.mutate(n)}
                   onReact={(emoji) => reactionAnyMutation.mutate(emoji)}
                 />
@@ -474,25 +488,183 @@ function PostHeader({
 }
 
 /**
+ * Poll block.
+ *
+ * The post's caption is the question — it is already rendered above, so
+ * this draws only the answers.
+ *
+ * Before reveal the viewer can vote and see their OWN choice, but no
+ * counts: same rule as responses and comments. After reveal each row
+ * gains a share bar and a vote count. Tapping a chosen option again
+ * clears the vote (sends an empty selection).
+ */
+function PollBlock({
+  postId,
+  viewerOptionIds,
+  onVote,
+}: {
+  postId: string;
+  viewerOptionIds: string[];
+  onVote: (optionIds: string[]) => void;
+}) {
+  const pollQuery = useQuery({
+    queryKey: ['post', postId, 'poll'],
+    queryFn: () => getPollResults(postId),
+    staleTime: 30_000,
+  });
+
+  const poll = pollQuery.data;
+
+  // The parent's optimistic value wins while a vote is in flight — the
+  // poll query hasn't refetched yet at that point.
+  const selected = viewerOptionIds;
+
+  if (pollQuery.isLoading && !poll) {
+    return (
+      <View className="py-4">
+        <ActivityIndicator color={colors.brand.primary} />
+      </View>
+    );
+  }
+  if (!poll) return null;
+
+  const revealed = poll.revealed;
+  const totalVoters = poll.totalVoters ?? 0;
+
+  const toggle = (optionId: string) => {
+    const has = selected.includes(optionId);
+    if (poll.multiSelect) {
+      onVote(has ? selected.filter((id) => id !== optionId) : [...selected, optionId]);
+      return;
+    }
+    // Single choice: tapping the current answer clears it, tapping another
+    // replaces it outright.
+    onVote(has ? [] : [optionId]);
+  };
+
+  return (
+    <View
+      className="py-3 mb-1"
+      style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
+    >
+      <View className="flex-row items-center justify-between mb-2">
+        <Text variant="caption" tone="secondary">
+          {poll.multiSelect ? 'Select one or more' : 'Select one'}
+        </Text>
+        <Text variant="caption" tone="tertiary">
+          {revealed
+            ? `${totalVoters} vote${totalVoters === 1 ? '' : 's'}`
+            : 'Results hidden until reveal'}
+        </Text>
+      </View>
+
+      <View className="gap-2">
+        {poll.options.map((opt) => {
+          const isSelected = selected.includes(opt.id);
+          const votes = opt.votes ?? 0;
+          // Share of voters, not of votes — with multi-select the columns
+          // legitimately sum past 100%, and dividing by row count would
+          // understate every bar.
+          const pct = revealed && totalVoters > 0 ? Math.round((votes / totalVoters) * 100) : 0;
+          // Only dim while the viewer actually holds a single-choice answer;
+          // with nothing picked every option is still live. After reveal the
+          // rows carry results everyone needs to read, so nothing is dimmed
+          // then regardless of what the viewer voted for.
+          const dimUnselected =
+            !revealed && !poll.multiSelect && selected.length > 0 && !isSelected;
+
+          return (
+            <Pressable
+              key={opt.id}
+              onPress={() => toggle(opt.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Vote for ${opt.label}`}
+              className={[
+                'rounded-md border overflow-hidden active:opacity-80',
+                isSelected ? 'border-primary' : 'border-border',
+                // Single-choice: once an answer is picked the others take a
+                // grey ground so the current choice reads at a glance. They
+                // stay tappable — this is a de-emphasis, not a disable,
+                // because switching answers has to remain possible.
+                // Multi-select skips it, since every unpicked option there is
+                // still an equal candidate.
+                dimUnselected ? 'bg-surface-muted' : 'bg-surface',
+              ].join(' ')}
+            >
+              {/* Fill bar sits behind the label, only after reveal. */}
+              {revealed ? (
+                <View
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: `${pct}%`,
+                    backgroundColor: isSelected
+                      ? colors.brand.primarySubtle
+                      : colors.surface.muted,
+                  }}
+                />
+              ) : null}
+
+              {/* Height via className only — the outer Pressable carries an
+                  inline style for its dynamic border colour, and NativeWind's
+                  cssInterop drops an inline style that sits alongside a
+                  className on the same element. Keeping them on separate
+                  elements is what makes both stick. */}
+              <View className="flex-row items-center px-3 py-4 min-h-[56px]">
+                <Ionicons
+                  name={
+                    poll.multiSelect
+                      ? isSelected
+                        ? 'checkbox'
+                        : 'square-outline'
+                      : isSelected
+                        ? 'radio-button-on'
+                        : 'radio-button-off'
+                  }
+                  size={18}
+                  color={isSelected ? colors.brand.primary : colors.text.tertiary}
+                />
+                <Text
+                  variant="body"
+                  tone={dimUnselected ? 'secondary' : 'primary'}
+                  className="flex-1 ml-2"
+                  numberOfLines={2}
+                >
+                  {opt.label}
+                </Text>
+                {revealed ? (
+                  <Text variant="caption" bold tone="secondary" className="ml-2">
+                    {pct}%
+                  </Text>
+                ) : null}
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+/**
  * Compact inline engagement row — one entry per enabled interaction type,
- * matching plan §10.1's `[♡ Like] [Yes][No] [★★★★★] [emoji]` density
+ * matching plan §10.1's `[♡ Like] [★★★★★] [emoji]` density
  * instead of the old vertically-stacked "Interact" section.
  */
 function EngagementBar({
   post,
   onLike,
-  onYesNo,
   onRate,
   onReact,
 }: {
   post: PostDetail;
   onLike: () => void;
-  onYesNo: (v: 'yes' | 'no') => void;
   onRate: (n: number) => void;
   onReact: (emoji: string) => void;
 }) {
   const allowed = post.allowedInteractions ?? [];
-  const viewerYesNoVote = (post as unknown as { viewerYesNoVote: string | null }).viewerYesNoVote;
   const viewerRating = (post as unknown as { viewerRating: number | null }).viewerRating;
 
   if (allowed.length === 0) return null;
@@ -502,38 +674,20 @@ function EngagementBar({
       className="flex-row items-center flex-wrap gap-2 py-3 mb-1"
       style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
     >
-      {allowed.includes('yesNo') ? (
-        <View className="flex-row rounded-full overflow-hidden border" style={{ borderColor: colors.brand.primary }}>
-          {(['yes', 'no'] as const).map((v) => {
-            const active = viewerYesNoVote === v;
-            return (
-              <Pressable
-                key={v}
-                onPress={() => onYesNo(v)}
-                accessibilityRole="button"
-                accessibilityLabel={v === 'yes' ? 'Vote yes' : 'Vote no'}
-                className="px-3.5 py-1.5"
-                style={{ backgroundColor: active ? colors.brand.primary : colors.surface.bg }}
-              >
-                <Text variant="caption" bold tone={active ? 'onDark' : 'primary'}>{v === 'yes' ? 'Yes' : 'No'}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
-
       {allowed.includes('rating') ? (
         // Real star-rating behaviour: tapping the Nth star fills 1..N,
         // rather than highlighting only the exact number tapped.
+        // Always 5 stars — the 1-10 scale was removed. Older posts that
+        // stored ratingScale=10 render as 5 here by design.
         <View className="flex-row items-center flex-wrap gap-0.5">
-          {Array.from({ length: post.ratingScale ?? 5 }, (_, i) => i + 1).map((n) => {
+          {Array.from({ length: RATING_SCALE }, (_, i) => i + 1).map((n) => {
             const filled = viewerRating != null && n <= viewerRating;
             return (
               <Pressable
                 key={n}
                 onPress={() => onRate(n)}
                 accessibilityRole="button"
-                accessibilityLabel={`Rate ${n} out of ${post.ratingScale ?? 5}`}
+                accessibilityLabel={`Rate ${n} out of ${RATING_SCALE}`}
                 hitSlop={4}
                 className="items-center justify-center active:opacity-70"
                 style={{ padding: 2 }}
@@ -548,7 +702,7 @@ function EngagementBar({
           })}
           {viewerRating != null ? (
             <Text variant="caption" tone="secondary" className="ml-1.5">
-              {viewerRating}/{post.ratingScale ?? 5}
+              {viewerRating}/{RATING_SCALE}
             </Text>
           ) : null}
         </View>

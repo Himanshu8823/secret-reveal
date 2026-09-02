@@ -20,8 +20,17 @@ import { z } from 'zod';
  *   defeat the "discussion" mechanic), 24 hour ceiling (anything longer is
  *   essentially "never reveals" and would clog the reveal queue).
  */
-export const INTERACTION_TYPES = ['yesNo', 'textComment', 'reaction', 'rating', 'like'] as const;
+export const INTERACTION_TYPES = ['poll', 'textComment', 'reaction', 'rating', 'like'] as const;
 export type InteractionType = (typeof INTERACTION_TYPES)[number];
+
+/** Rating is always 1-5. Kept as a named constant so the UI and the
+ *  validator can't drift apart. */
+export const RATING_SCALE = 5;
+
+/** A poll needs at least two answers to be a choice, and more than six
+ *  stops being scannable on a phone. */
+export const POLL_MIN_OPTIONS = 2;
+export const POLL_MAX_OPTIONS = 6;
 
 export const createPostSchema = z
   .object({
@@ -54,7 +63,30 @@ export const createPostSchema = z
       .min(1, 'Pick at least one interaction type')
       .max(5)
       .default(['textComment']),
-    ratingScale: z.union([z.literal(5), z.literal(10)]).optional().nullable(),
+    // Rating is fixed at 1-5. The field is still accepted so older clients
+    // don't start failing mid-rollout, but only the value 5 is legal and
+    // the service ignores it either way.
+    ratingScale: z.literal(RATING_SCALE).optional().nullable(),
+    /**
+     * Poll answers. The question is the post's caption — we never take a
+     * separate question field. Order is the array order.
+     */
+    pollOptions: z
+      .array(
+        z
+          .string()
+          .transform((s) => s.trim())
+          .pipe(
+            z
+              .string()
+              .min(1, 'Poll options cannot be empty')
+              .max(120, 'Poll options must be at most 120 characters'),
+          ),
+      )
+      .max(POLL_MAX_OPTIONS, `A poll can have at most ${POLL_MAX_OPTIONS} options`)
+      .optional(),
+    /** Whether one voter may pick several answers. Poll-only. */
+    pollMultiSelect: z.boolean().optional(),
   })
   .refine(
     (b) => Boolean(b.groupId) !== Boolean(b.memberIds && b.memberIds.length > 0),
@@ -65,15 +97,8 @@ export const createPostSchema = z
   )
   .superRefine((b, ctx) => {
     const types = b.allowedInteractions ?? [];
-    const hasYesNo = types.includes('yesNo');
-    const hasRating = types.includes('rating');
-    if (hasYesNo && hasRating) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Yes/No and Rating cannot be used together',
-        path: ['allowedInteractions'],
-      });
-    }
+    const hasPoll = types.includes('poll');
+
     // dedup check
     if (new Set(types).size !== types.length) {
       ctx.addIssue({
@@ -82,15 +107,47 @@ export const createPostSchema = z
         path: ['allowedInteractions'],
       });
     }
-    if (hasRating) {
-      if (b.ratingScale !== 5 && b.ratingScale !== 10) {
+
+    // Poll options are required with a poll and meaningless without one.
+    if (hasPoll) {
+      const options = b.pollOptions ?? [];
+      if (options.length < POLL_MIN_OPTIONS) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Rating scale must be 5 or 10 when rating is enabled',
-          path: ['ratingScale'],
+          message: `A poll needs at least ${POLL_MIN_OPTIONS} options`,
+          path: ['pollOptions'],
         });
       }
-    } else if (b.ratingScale != null) {
+      // Two identical answers make the result unreadable — the voter
+      // can't tell which one they picked.
+      const seen = options.map((o) => o.toLowerCase());
+      if (new Set(seen).size !== seen.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Poll options must be unique',
+          path: ['pollOptions'],
+        });
+      }
+    } else {
+      if (b.pollOptions != null && b.pollOptions.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Poll options are only allowed when the poll interaction is enabled',
+          path: ['pollOptions'],
+        });
+      }
+      if (b.pollMultiSelect != null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'pollMultiSelect is only allowed when the poll interaction is enabled',
+          path: ['pollMultiSelect'],
+        });
+      }
+    }
+
+    // Rating no longer carries a scale choice — it is always 1-5. Only an
+    // explicit non-5 value is rejected; omitting it is the normal case.
+    if (!types.includes('rating') && b.ratingScale != null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Rating scale only allowed when rating interaction is enabled',
@@ -164,13 +221,25 @@ export const createCommentSchema = z.object({
 
 export type CreateCommentBody = z.infer<typeof createCommentSchema>;
 
-export const yesNoVoteSchema = z.object({
-  value: z.enum(['yes', 'no']),
+/**
+ * POST /posts/:id/poll-vote body.
+ *
+ * Always an array, even for a single-select poll — one shape for both
+ * modes keeps the client from branching. An empty array clears the
+ * viewer's vote. The service rejects more than one entry on a
+ * single-select poll and validates that the ids belong to this post.
+ */
+export const pollVoteSchema = z.object({
+  optionIds: z
+    .array(z.string().uuid('optionIds must be UUIDs'))
+    .max(POLL_MAX_OPTIONS, `Cannot select more than ${POLL_MAX_OPTIONS} options`),
 });
-export type YesNoVoteBody = z.infer<typeof yesNoVoteSchema>;
+export type PollVoteBody = z.infer<typeof pollVoteSchema>;
 
+// Rating is 1-5 everywhere now. The old bound accepted up to 10, which
+// would have let a client write a 7 onto a 1-5 post.
 export const ratingSchema = z.object({
-  value: z.number().int().min(1).max(10),
+  value: z.number().int().min(1).max(RATING_SCALE),
 });
 export type RatingBody = z.infer<typeof ratingSchema>;
 

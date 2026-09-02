@@ -15,15 +15,18 @@ import {
   type InteractionType,
   type MediaKind,
   validateInteractions,
+  validatePollOptions,
+  POLL_MIN_OPTIONS,
+  POLL_MAX_OPTIONS,
 } from '../../../src/store/composerStore';
 
 const CAPTION_MAX = 2000;
 
 const INTERACTIONS: { key: InteractionType; label: string; icon: string; desc: string }[] = [
-  { key: 'yesNo', label: 'Yes / No', icon: 'checkmark-done-outline', desc: 'Binary poll' },
+  { key: 'poll', label: 'Poll', icon: 'stats-chart-outline', desc: 'Up to 6 options' },
   { key: 'textComment', label: 'Text', icon: 'chatbubble-outline', desc: 'Free text' },
   { key: 'reaction', label: 'Reaction', icon: 'happy-outline', desc: 'Any emoji' },
-  { key: 'rating', label: 'Rating', icon: 'star-outline', desc: '1-5 or 1-10' },
+  { key: 'rating', label: 'Rating', icon: 'star-outline', desc: '1-5 stars' },
   { key: 'like', label: 'Like', icon: 'heart-outline', desc: 'Heart toggle' },
 ];
 
@@ -35,9 +38,12 @@ export default function CreateCaptionScreen() {
   const updateAttachment = useComposerStore((s) => s.updateAttachment);
   const removeAttachment = useComposerStore((s) => s.removeAttachment);
   const interactionTypes = useComposerStore((s) => s.interactionTypes);
-  const ratingScale = useComposerStore((s) => s.ratingScale);
   const toggleInteraction = useComposerStore((s) => s.toggleInteraction);
-  const setRatingScale = useComposerStore((s) => s.setRatingScale);
+  const pollOptions = useComposerStore((s) => s.pollOptions);
+  const pollMultiSelect = useComposerStore((s) => s.pollMultiSelect);
+  const setPollOption = useComposerStore((s) => s.setPollOption);
+  const setPollOptionCount = useComposerStore((s) => s.setPollOptionCount);
+  const setPollMultiSelect = useComposerStore((s) => s.setPollMultiSelect);
   const [localCaption, setLocalCaption] = useState(caption);
   // The caption only reaches the store on "Next", so pass the in-progress
   // local text in — otherwise typing then closing skips the prompt.
@@ -46,7 +52,11 @@ export default function CreateCaptionScreen() {
 
   const captionOk = localCaption.trim().length >= 1 && localCaption.length <= CAPTION_MAX;
   const interactionError = validateInteractions(interactionTypes);
-  const canContinue = captionOk && !interactionError;
+  const hasPoll = interactionTypes.includes('poll');
+  // Only surfaced once the poll is actually enabled — otherwise the
+  // "needs 2 options" message would show against an empty builder.
+  const pollError = hasPoll ? validatePollOptions(pollOptions) : null;
+  const canContinue = captionOk && !interactionError && !pollError;
 
   const atLimit = () => {
     if (attachments.length >= 5) {
@@ -173,14 +183,15 @@ export default function CreateCaptionScreen() {
       dialog.show({ variant: 'warning', title: 'Pick interaction type', message: interactionError, actions: [{ label: 'OK' }] });
       return;
     }
+    if (pollError) {
+      dialog.show({ variant: 'warning', title: 'Finish the poll', message: pollError, actions: [{ label: 'OK' }] });
+      return;
+    }
     setCaption(localCaption.trim());
     router.push('/(app)/create/timer');
   };
 
   const onClose = confirmDiscard;
-
-  const hasYesNo = interactionTypes.includes('yesNo');
-  const hasRating = interactionTypes.includes('rating');
 
   return (
     <SafeAreaView className="flex-1 bg-surface" edges={['top', 'bottom']}>
@@ -297,20 +308,17 @@ export default function CreateCaptionScreen() {
           {/* Interaction Types */}
           <View className="mt-6">
             <Text variant="bodyStrong">Comment type *</Text>
-            <Text variant="caption" tone="secondary" className="mt-1">Pick how people can respond. Like / Text / Reaction can combine with any. Yes/No and Rating cannot be together.</Text>
+            <Text variant="caption" tone="secondary" className="mt-1">Pick how people can respond. Any of these can be combined.</Text>
             <View className="flex-row flex-wrap gap-2 mt-3">
               {INTERACTIONS.map((it) => {
                 const selected = interactionTypes.includes(it.key);
-                const disabled = (it.key === 'yesNo' && hasRating) || (it.key === 'rating' && hasYesNo);
                 return (
                   <Pressable
                     key={it.key}
                     onPress={() => toggleInteraction(it.key)}
-                    disabled={disabled}
                     className={[
                       'flex-row items-center px-3 py-2 rounded-full border active:opacity-80',
                       selected ? 'bg-primary-subtle border-primary' : 'bg-surface border-border',
-                      disabled ? 'opacity-40' : '',
                     ].join(' ')}
                   >
                     <Ionicons name={it.icon as never} size={14} color={selected ? colors.brand.primary : colors.text.secondary} />
@@ -320,21 +328,86 @@ export default function CreateCaptionScreen() {
               })}
             </View>
             {interactionError ? <Text variant="caption" tone="danger" className="mt-2">{interactionError}</Text> : null}
-            {hasYesNo && hasRating ? <Text variant="caption" tone="danger" className="mt-2">Yes/No and Rating cannot be used together</Text> : null}
 
-            {hasRating ? (
-              <View className="mt-4">
-                <Text variant="caption" tone="secondary" className="mb-2">Rating scale</Text>
-                <View className="flex-row gap-2">
-                  {[5, 10].map((s) => {
-                    const sel = ratingScale === s;
+            {/* Poll builder. The question is the caption above — we don't
+                ask for it twice. Answers, count, and single-vs-multi live
+                here; results stay hidden until the post reveals. */}
+            {hasPoll ? (
+              <View className="mt-5">
+                <View className="flex-row items-center justify-between">
+                  <Text variant="bodyStrong">Poll options</Text>
+                  <Text variant="caption" tone="secondary">
+                    {pollOptions.length} of {POLL_MAX_OPTIONS}
+                  </Text>
+                </View>
+                <Text variant="caption" tone="secondary" className="mt-1">
+                  Your question above is what people vote on. Results stay hidden until reveal.
+                </Text>
+
+                <View className="mt-3 gap-2">
+                  {pollOptions.map((opt, i) => (
+                    <View key={i} className="flex-row items-center">
+                      {/* Height is set with className, not an inline `style`.
+                          NativeWind's cssInterop rewrites className into the
+                          style prop on these components, which drops any
+                          inline style passed alongside it — that is why the
+                          earlier inline minHeight/padding never showed up. */}
+                      <View className="flex-1 border border-border rounded-md bg-surface">
+                        <TextInput
+                          value={opt}
+                          onChangeText={(v) => setPollOption(i, v)}
+                          placeholder={`Option ${i + 1}`}
+                          placeholderTextColor={colors.text.tertiary}
+                          maxLength={120}
+                          textAlignVertical="center"
+                          className="px-3 py-4 text-[15px] leading-5 text-text-primary min-h-[56px]"
+                        />
+                      </View>
+                      {pollOptions.length > POLL_MIN_OPTIONS ? (
+                        <Pressable
+                          onPress={() => setPollOptionCount(pollOptions.length - 1)}
+                          hitSlop={8}
+                          accessibilityLabel={`Remove option ${i + 1}`}
+                          className="w-9 h-9 ml-1 items-center justify-center rounded-full active:bg-surface-muted"
+                        >
+                          <Ionicons name="close" size={16} color={colors.text.secondary} />
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+
+                {pollOptions.length < POLL_MAX_OPTIONS ? (
+                  <Pressable
+                    onPress={() => setPollOptionCount(pollOptions.length + 1)}
+                    className="mt-2 flex-row items-center py-2 active:opacity-70"
+                    accessibilityLabel="Add poll option"
+                  >
+                    <Ionicons name="add" size={16} color={colors.brand.primary} />
+                    <Text variant="caption" bold tone="link" className="ml-1">Add option</Text>
+                  </Pressable>
+                ) : null}
+
+                {/* Single vs multiple — the author decides per poll. */}
+                <View className="flex-row gap-2 mt-3">
+                  {[
+                    { multi: false, label: 'Single choice' },
+                    { multi: true, label: 'Multiple choice' },
+                  ].map((m) => {
+                    const sel = pollMultiSelect === m.multi;
                     return (
-                      <Pressable key={s} onPress={() => setRatingScale(s as 5 | 10)} className={['flex-1 py-2.5 rounded-md border items-center', sel ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}>
-                        <Text variant="bodyStrong" tone={sel ? 'onDark' : 'primary'}>1–{s}</Text>
+                      <Pressable
+                        key={m.label}
+                        onPress={() => setPollMultiSelect(m.multi)}
+                        className={['flex-1 rounded-md border items-center justify-center px-3 py-4 min-h-[56px]', sel ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}
+                      >
+                        <Text variant="caption" bold tone={sel ? 'onDark' : 'primary'}>{m.label}</Text>
                       </Pressable>
                     );
                   })}
                 </View>
+
+                {pollError ? <Text variant="caption" tone="danger" className="mt-2">{pollError}</Text> : null}
               </View>
             ) : null}
           </View>

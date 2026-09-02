@@ -50,7 +50,9 @@ export type PostDetail = {
   likeCount: number;
   viewerReaction: string | null;
   viewerLiked: boolean;
-  viewerYesNoVote: string | null;
+  /** The viewer's own poll selection. Empty when they haven't voted.
+   *  Always returned — only the tallies are gated until reveal. */
+  viewerPollOptionIds: string[];
   viewerRating: number | null;
 };
 
@@ -111,6 +113,10 @@ export type CreatePostInput = {
   groupName?: string;
   allowedInteractions?: string[];
   ratingScale?: number | null;
+  /** Answer labels, in display order. Poll posts only. */
+  pollOptions?: string[];
+  /** Whether one voter may pick several answers. Poll posts only. */
+  pollMultiSelect?: boolean;
 };
 
 export type CreatePostResult = {
@@ -171,14 +177,32 @@ export type CreateCommentInput = {
 
 export type ListCommentsResult = CommentItem[];
 
-// --- YesNo / Rating / Reactions -------------------------------------------
+// --- Poll / Rating / Reactions --------------------------------------------
 
-export type YesNoVoteItem = {
+/** One answer on a poll. `votes` is null until the post reveals. */
+export type PollOptionItem = {
+  id: string;
+  label: string;
+  order: number;
+  votes: number | null;
+};
+
+export type PollResults = {
+  revealed: boolean;
+  multiSelect: boolean;
+  /** Distinct voters, not row count — a multi-select poll has more rows
+   *  than people. Null until reveal. */
+  totalVoters: number | null;
+  options: PollOptionItem[];
+  /** The requesting viewer's own selection; visible before reveal. */
+  myOptionIds: string[];
+};
+
+export type PollVoteItem = {
+  optionId: string;
   postId: string;
   userId: string;
-  value: 'yes' | 'no';
   createdAt: Date;
-  updatedAt: Date;
 };
 
 export type RatingItem = {

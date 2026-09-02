@@ -23,7 +23,9 @@ export default function CreateGroupsScreen() {
   const hasPendingUploads = useComposerStore((s) => s.hasPendingUploads);
   const timerMinutes = useComposerStore((s) => s.timerMinutes);
   const interactionTypes = useComposerStore((s) => s.interactionTypes);
-  const ratingScale = useComposerStore((s) => s.ratingScale);
+  const isPoll = interactionTypes.includes('poll');
+  const pollMultiSelect = useComposerStore((s) => s.pollMultiSelect);
+  const filledPollOptions = useComposerStore((s) => s.filledPollOptions);
   const groupName = useComposerStore((s) => s.groupName);
   const invitees = useComposerStore((s) => s.invitees);
   const selectedExistingGroupId = useComposerStore((s) => s.selectedExistingGroupId);
@@ -90,7 +92,11 @@ export default function CreateGroupsScreen() {
         timerMinutes,
         groupName: localGroupName.trim(),
         allowedInteractions: interactionTypes.length ? interactionTypes : ['textComment'],
-        ratingScale: ratingScale ?? null,
+        // Poll fields go only with a poll — the backend rejects them
+        // otherwise. Blank answer slots are stripped before sending.
+        ...(isPoll
+          ? { pollOptions: filledPollOptions(), pollMultiSelect }
+          : {}),
       });
       queryClient.invalidateQueries({ queryKey: ['groups', 'mine'] });
       queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
@@ -126,7 +132,11 @@ export default function CreateGroupsScreen() {
         mediaIds: uploadedMediaIds(),
         timerMinutes,
         allowedInteractions: interactionTypes.length ? interactionTypes : ['textComment'],
-        ratingScale: ratingScale ?? null,
+        // Poll fields go only with a poll — the backend rejects them
+        // otherwise. Blank answer slots are stripped before sending.
+        ...(isPoll
+          ? { pollOptions: filledPollOptions(), pollMultiSelect }
+          : {}),
       });
       queryClient.invalidateQueries({ queryKey: ['groups', 'mine'] });
       queryClient.invalidateQueries({ queryKey: ['posts', 'feed'] });
@@ -153,10 +163,10 @@ export default function CreateGroupsScreen() {
 
       {/* Tabs */}
       <View className="flex-row px-4 pt-3 gap-2">
-        <Pressable onPress={() => setActiveTab('create')} className={['flex-1 py-2.5 rounded-md items-center border', activeTab === 'create' ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}>
+        <Pressable onPress={() => setActiveTab('create')} className={['flex-1 py-3 min-h-[48px] rounded-md items-center justify-center border', activeTab === 'create' ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}>
           <Text variant="bodyStrong" tone={activeTab === 'create' ? 'onDark' : 'primary'}>Create group</Text>
         </Pressable>
-        <Pressable onPress={() => setActiveTab('existing')} className={['flex-1 py-2.5 rounded-md items-center border', activeTab === 'existing' ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}>
+        <Pressable onPress={() => setActiveTab('existing')} className={['flex-1 py-3 min-h-[48px] rounded-md items-center justify-center border', activeTab === 'existing' ? 'bg-primary border-primary' : 'bg-surface border-border'].join(' ')}>
           <Text variant="bodyStrong" tone={activeTab === 'existing' ? 'onDark' : 'primary'}>Previous Groups</Text>
         </Pressable>
       </View>

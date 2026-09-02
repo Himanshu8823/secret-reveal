@@ -117,8 +117,27 @@ export type PostDetail = {
   likeCount: number;
   viewerReaction: string | null;
   viewerLiked: boolean;
-  viewerYesNoVote: string | null;
+  /** The viewer's own poll selection. Visible before reveal; only the
+   *  tallies are withheld until then. */
+  viewerPollOptionIds: string[];
   viewerRating: number | null;
+};
+
+/** One poll answer. `votes` is null until the post reveals. */
+export type PollOption = {
+  id: string;
+  label: string;
+  order: number;
+  votes: number | null;
+};
+
+export type PollResults = {
+  revealed: boolean;
+  multiSelect: boolean;
+  /** Distinct voters, not row count. Null until reveal. */
+  totalVoters: number | null;
+  options: PollOption[];
+  myOptionIds: string[];
 };
 
 export async function getPost(postId: string): Promise<PostDetail> {
@@ -149,6 +168,10 @@ export type CreatePostInput = {
   groupName?: string;
   allowedInteractions?: string[];
   ratingScale?: number | null;
+  /** Poll answers in display order. Only sent when 'poll' is enabled. */
+  pollOptions?: string[];
+  /** Whether one voter may pick several answers. Poll posts only. */
+  pollMultiSelect?: boolean;
 };
 
 export type CreatedPost = {
@@ -221,8 +244,23 @@ export async function toggleLike(postId: string): Promise<ToggleLikeResponse> {
   );
 }
 
-export async function voteYesNo(postId: string, value: 'yes' | 'no') {
-  return unwrap<unknown>(apiClient.post<ApiEnvelope<unknown>>(`/posts/${postId}/votes`, { value }));
+/**
+ * Replace the viewer's poll answer. Always send the COMPLETE selection —
+ * the backend treats it as the full answer, not a delta, so a retry can't
+ * double-count. An empty array clears the vote.
+ */
+export async function votePoll(postId: string, optionIds: string[]) {
+  return unwrap<{ optionIds: string[] }>(
+    apiClient.post<ApiEnvelope<{ optionIds: string[] }>>(`/posts/${postId}/poll-vote`, {
+      optionIds,
+    }),
+  );
+}
+
+export async function getPollResults(postId: string): Promise<PollResults> {
+  return unwrap<PollResults>(
+    apiClient.get<ApiEnvelope<PollResults>>(`/posts/${postId}/poll`),
+  );
 }
 
 export async function ratePost(postId: string, value: number) {
@@ -230,8 +268,10 @@ export async function ratePost(postId: string, value: number) {
 }
 
 export async function getMyVote(postId: string) {
-  return unwrap<{ yesNo: unknown; rating: unknown; reaction: unknown }>(
-    apiClient.get<ApiEnvelope<{ yesNo: unknown; rating: unknown; reaction: unknown }>>(`/posts/${postId}/my-vote`),
+  return unwrap<{ pollOptionIds: string[]; rating: unknown; reaction: unknown }>(
+    apiClient.get<ApiEnvelope<{ pollOptionIds: string[]; rating: unknown; reaction: unknown }>>(
+      `/posts/${postId}/my-vote`,
+    ),
   );
 }
 

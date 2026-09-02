@@ -19,7 +19,8 @@ import {
   postReactionAny,
   postResponse,
   postToggleLike,
-  postYesNoVote,
+  postPollVote,
+  getPollResultsHandler,
 } from './posts.controller.js';
 
 /**
@@ -55,7 +56,12 @@ postsRouter.post(
   rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'),
   postComment,
 );
-postsRouter.post('/:id/votes', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postYesNoVote);
+postsRouter.post(
+  '/:id/poll-vote',
+  rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'),
+  postPollVote,
+);
+postsRouter.get('/:id/poll', getPollResultsHandler);
 postsRouter.get('/:id/votes', getVotes);
 postsRouter.post('/:id/ratings', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postRating);
 postsRouter.get('/:id/ratings', getRatings);

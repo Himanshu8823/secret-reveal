@@ -11,7 +11,8 @@ import {
   listVotes as listVotesService,
   submitRating as submitRatingService,
   submitResponse as submitResponseService,
-  submitYesNoVote as submitYesNoVoteService,
+  submitPollVote as submitPollVoteService,
+  getPollResults as getPollResultsService,
   toggleReactionAny as toggleReactionAnyService,
   toggleLike as toggleLikeService,
 } from './posts.service.js';
@@ -23,7 +24,7 @@ import {
   ratingSchema,
   reactionSchema,
   submitResponseSchema,
-  yesNoVoteSchema,
+  pollVoteSchema,
 } from './posts.validation.js';
 
 /**
@@ -59,6 +60,8 @@ export async function postCreate(req: Request, res: Response, next: NextFunction
       groupName: body.groupName,
       allowedInteractions: body.allowedInteractions,
       ratingScale: body.ratingScale ?? null,
+      pollOptions: body.pollOptions,
+      pollMultiSelect: body.pollMultiSelect,
     });
     res.status(201).json({ success: true, data: result });
   } catch (err) {
@@ -153,12 +156,32 @@ export async function postComment(req: Request, res: Response, next: NextFunctio
   }
 }
 
-export async function postYesNoVote(req: Request, res: Response, next: NextFunction) {
+export async function postPollVote(req: Request, res: Response, next: NextFunction) {
   try {
     const user = requireUser(req);
     const { id } = postIdParamSchema.parse(req.params);
-    const body = yesNoVoteSchema.parse(req.body);
-    const result = await submitYesNoVoteService({ viewerId: user.id, postId: id, value: body.value });
+    const body = pollVoteSchema.parse(req.body);
+    const result = await submitPollVoteService({
+      viewerId: user.id,
+      postId: id,
+      optionIds: body.optionIds,
+    });
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /posts/:id/poll — options plus, once revealed, the tallies. Before
+ * reveal the counts come back null and only the viewer's own selection is
+ * populated.
+ */
+export async function getPollResultsHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const result = await getPollResultsService(user.id, id);
     res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);

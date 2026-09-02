@@ -95,21 +95,21 @@ describe('listMyGroups', () => {
         name: 'Newest',
         lastActivityAt: t1,
         createdAt: t1,
-        _count: { members: 3 },
+        _count: { members: 3, posts: 0 },
       },
       {
         id: 'g-2',
         name: 'Middle',
         lastActivityAt: t2,
         createdAt: t2,
-        _count: { members: 2 },
+        _count: { members: 2, posts: 0 },
       },
       {
         id: 'g-3',
         name: 'Oldest',
         lastActivityAt: t3,
         createdAt: t3,
-        _count: { members: 5 },
+        _count: { members: 5, posts: 0 },
       },
     ]);
 
@@ -120,7 +120,16 @@ describe('listMyGroups', () => {
         where: { members: { some: { userId: 'user-1' } } },
         orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
         take: 11, // limit + 1
-        include: { _count: { select: { members: true } } },
+        // postCount excludes soft-deleted posts so it agrees with what
+        // listPosts actually returns.
+        include: {
+          _count: {
+            select: {
+              members: true,
+              posts: { where: { status: { not: 'deleted' } } },
+            },
+          },
+        },
       }),
     );
 
@@ -139,21 +148,21 @@ describe('listMyGroups', () => {
         name: 'A',
         lastActivityAt: t,
         createdAt: t,
-        _count: { members: 1 },
+        _count: { members: 1, posts: 0 },
       },
       {
         id: 'g-2',
         name: 'B',
         lastActivityAt: t,
         createdAt: t,
-        _count: { members: 1 },
+        _count: { members: 1, posts: 0 },
       },
       {
         id: 'g-3',
         name: 'C',
         lastActivityAt: t,
         createdAt: t,
-        _count: { members: 1 },
+        _count: { members: 1, posts: 0 },
       },
     ]);
 
@@ -227,6 +236,7 @@ describe('getGroup', () => {
           user: { id: 'user-2', name: 'B', phone: '+912222222222' },
         },
       ],
+      _count: { posts: 0 },
     });
 
     const result = await getGroup('user-1', 'group-1');
@@ -345,7 +355,7 @@ describe('findOrCreateGroupByMembers', () => {
       name: 'A, B, C',
       lastActivityAt: new Date(),
       createdAt: new Date(),
-      _count: { members: 3 },
+      _count: { members: 3, posts: 0 },
     });
 
     const result = await findOrCreateGroupByMembers({
@@ -369,7 +379,7 @@ describe('findOrCreateGroupByMembers', () => {
       name: 'Alice, Bob',
       lastActivityAt: new Date(),
       createdAt: new Date(),
-      _count: { members: 2 },
+      _count: { members: 2, posts: 0 },
     });
 
     const result = await findOrCreateGroupByMembers({
@@ -405,7 +415,7 @@ describe('findOrCreateGroupByMembers', () => {
       name: 'Untitled',
       lastActivityAt: new Date(),
       createdAt: new Date(),
-      _count: { members: 2 },
+      _count: { members: 2, posts: 0 },
     });
 
     await findOrCreateGroupByMembers({
@@ -447,7 +457,7 @@ describe('findOrCreateGroupByMembers', () => {
         name: 'A, B',
         lastActivityAt: new Date(),
         createdAt: new Date(),
-        _count: { members: 2 },
+        _count: { members: 2, posts: 0 },
       });
     mockPrisma.user.findMany.mockResolvedValue([
       { id: 'user-1', name: 'A' },

@@ -7,12 +7,39 @@ import { create } from 'zustand';
  */
 export type Invitee = { id: string; name: string };
 
-export type InteractionType = 'yesNo' | 'textComment' | 'reaction' | 'rating' | 'like';
+export type InteractionType = 'poll' | 'textComment' | 'reaction' | 'rating' | 'like';
+
+/** Mirrors the backend's POLL_MIN_OPTIONS / POLL_MAX_OPTIONS. */
+export const POLL_MIN_OPTIONS = 2;
+export const POLL_MAX_OPTIONS = 6;
+
+/** Rating is always 1-5 now — no scale choice. */
+export const RATING_SCALE = 5;
 
 export function validateInteractions(types: InteractionType[]): string | null {
   if (types.length === 0) return 'Pick at least one interaction type';
-  if (types.includes('yesNo') && types.includes('rating')) return 'Yes/No and Rating cannot be used together';
   if (new Set(types).size !== types.length) return 'Duplicate interaction types';
+  return null;
+}
+
+/**
+ * Poll answers are valid when there are enough of them, none is blank,
+ * and no two are the same. Returns null when the poll is postable.
+ * Mirrors the backend's superRefine so the user sees the problem before
+ * the round-trip rather than as a 400.
+ */
+export function validatePollOptions(options: string[]): string | null {
+  const filled = options.map((o) => o.trim()).filter((o) => o.length > 0);
+  if (filled.length < POLL_MIN_OPTIONS) {
+    return `A poll needs at least ${POLL_MIN_OPTIONS} options`;
+  }
+  if (filled.length > POLL_MAX_OPTIONS) {
+    return `A poll can have at most ${POLL_MAX_OPTIONS} options`;
+  }
+  const lowered = filled.map((o) => o.toLowerCase());
+  if (new Set(lowered).size !== lowered.length) {
+    return 'Poll options must be unique';
+  }
   return null;
 }
 
@@ -38,7 +65,14 @@ type ComposerState = {
   caption: string;
   attachments: MediaAttachment[];
   interactionTypes: InteractionType[];
-  ratingScale: 5 | 10 | null;
+  /**
+   * Poll answers, in display order. Kept as a fixed-length array of
+   * strings (blank entries allowed while typing) so the inputs stay
+   * stable as the user edits; blanks are stripped at publish time.
+   */
+  pollOptions: string[];
+  /** Whether one voter may pick several answers. */
+  pollMultiSelect: boolean;
   timerMinutes: number | null;
   groupName: string;
   invitees: Invitee[];
@@ -52,7 +86,13 @@ type ComposerState = {
   uploadedMediaIds: () => string[];
   hasPendingUploads: () => boolean;
   toggleInteraction: (t: InteractionType) => void;
-  setRatingScale: (s: 5 | 10) => void;
+  /** Sets how many answer slots the poll has (clamped to the 2..6 range). */
+  setPollOptionCount: (n: number) => void;
+  /** Edits one answer slot in place. */
+  setPollOption: (index: number, value: string) => void;
+  setPollMultiSelect: (v: boolean) => void;
+  /** Trimmed, non-empty answers — the only shape safe to POST. */
+  filledPollOptions: () => string[];
   setTimer: (m: number) => void;
   setGroupName: (v: string) => void;
   setSelectedExistingGroupId: (id: string | null) => void;
@@ -68,7 +108,10 @@ const initial = {
   caption: '',
   attachments: [] as MediaAttachment[],
   interactionTypes: [] as InteractionType[],
-  ratingScale: null as 5 | 10 | null,
+  // Two blank slots is the smallest valid poll — the user fills them in
+  // rather than having to add rows before they can type anything.
+  pollOptions: ['', ''] as string[],
+  pollMultiSelect: false,
   timerMinutes: null as number | null,
   groupName: '',
   invitees: [] as Invitee[],
@@ -98,21 +141,41 @@ export const useComposerStore = create<ComposerState>((set, get) => ({
   toggleInteraction: (t) =>
     set((s) => {
       const has = s.interactionTypes.includes(t);
-      let next: InteractionType[];
       if (has) {
-        next = s.interactionTypes.filter((x) => x !== t);
-        // if rating removed, clear scale
-        if (t === 'rating') return { interactionTypes: next, ratingScale: null };
+        const next = s.interactionTypes.filter((x) => x !== t);
+        // Turning the poll off discards its answers — leaving them around
+        // would silently re-submit stale options if it were toggled back
+        // on later in the same composition.
+        if (t === 'poll') {
+          return { interactionTypes: next, pollOptions: ['', ''], pollMultiSelect: false };
+        }
         return { interactionTypes: next };
       }
-      // enforce yesNo ↔ rating exclusivity
-      if (t === 'yesNo' && s.interactionTypes.includes('rating')) return s;
-      if (t === 'rating' && s.interactionTypes.includes('yesNo')) return s;
-      next = [...s.interactionTypes, t];
-      if (t === 'rating' && s.ratingScale == null) return { interactionTypes: next, ratingScale: 5 };
-      return { interactionTypes: next };
+      // Poll composes freely with the other interactions — no exclusivity
+      // rules remain now that Yes/No is gone.
+      return { interactionTypes: [...s.interactionTypes, t] };
     }),
-  setRatingScale: (s) => set({ ratingScale: s }),
+  setPollOptionCount: (n) =>
+    set((s) => {
+      const target = Math.max(POLL_MIN_OPTIONS, Math.min(POLL_MAX_OPTIONS, n));
+      const current = s.pollOptions;
+      if (target === current.length) return s;
+      if (target < current.length) {
+        // Trim from the end — the user's earlier answers are the ones
+        // they're most likely to want kept.
+        return { pollOptions: current.slice(0, target) };
+      }
+      return { pollOptions: [...current, ...Array(target - current.length).fill('')] };
+    }),
+  setPollOption: (index, value) =>
+    set((s) => ({
+      pollOptions: s.pollOptions.map((o, i) => (i === index ? value : o)),
+    })),
+  setPollMultiSelect: (v) => set({ pollMultiSelect: v }),
+  filledPollOptions: () =>
+    get()
+      .pollOptions.map((o) => o.trim())
+      .filter((o) => o.length > 0),
   setTimer: (m) => set({ timerMinutes: m }),
   setGroupName: (v) => set({ groupName: v }),
   setSelectedExistingGroupId: (id) => set({ selectedExistingGroupId: id }),
