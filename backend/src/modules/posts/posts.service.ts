@@ -1193,6 +1193,53 @@ export async function listVotes(viewerId: string, postId: string) {
   return prisma.pollVote.findMany({ where: { postId }, orderBy: { createdAt: 'asc' } });
 }
 
+/**
+ * Who liked this post, and who reacted with what.
+ *
+ * Both are reveal-gated exactly like ratings and comments: before reveal
+ * the counts are already visible on the post, but WHO is behind them is
+ * not. Handing back names during the hidden phase would let anyone work
+ * out the room's leaning from the like list alone, which is the whole
+ * thing the hidden phase exists to prevent.
+ */
+export async function listPostReactors(viewerId: string, postId: string) {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    select: { groupId: true, status: true },
+  });
+  if (!post) throw new AppError(404, ErrorCode.VALIDATION_FAILED, 'Post not found');
+  const membership = await prisma.groupMember.findUnique({
+    where: { groupId_userId: { groupId: post.groupId, userId: viewerId } },
+    select: { groupId: true },
+  });
+  if (!membership) throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member');
+  if (post.status === 'active') {
+    throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'Hidden until reveal');
+  }
+
+  const [likes, reactions] = await Promise.all([
+    prisma.postLike.findMany({
+      where: { postId },
+      select: { userId: true, createdAt: true, user: { select: { name: true } } },
+      orderBy: { createdAt: 'asc' },
+    }),
+    prisma.reaction.findMany({
+      where: { postId },
+      select: { userId: true, type: true, user: { select: { name: true } } },
+      orderBy: { createdAt: 'asc' },
+    }),
+  ]);
+
+  return {
+    likes: likes.map((l) => ({ userId: l.userId, name: l.user.name })),
+    reactions: reactions.map((r) => ({
+      userId: r.userId,
+      name: r.user.name,
+      emoji: r.type,
+    })),
+  };
+}
+
 export async function listRatings(viewerId: string, postId: string) {
   const post = await prisma.post.findUnique({ where: { id: postId }, select: { groupId: true, status: true } });
   if (!post) throw new AppError(404, ErrorCode.VALIDATION_FAILED, 'Post not found');

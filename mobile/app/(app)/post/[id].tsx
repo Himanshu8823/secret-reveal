@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -25,12 +26,12 @@ import {
   createComment as createCommentApi,
   getPost,
   listComments,
-  listResponses,
   ratePost,
   toggleLike,
   toggleReactionAny,
   votePoll,
   getPollResults,
+  getPostReactors,
   type CommentItem,
   type CommentQuote,
   type PostDetail,
@@ -83,21 +84,6 @@ export default function HiddenDiscussionScreen() {
     refetchOnWindowFocus: false,
   });
 
-  const responsesQuery = useQuery({
-    queryKey: ['post', postId, 'responses'],
-    queryFn: () => listResponses(postId),
-    enabled: Boolean(postId),
-    // 403 during active phase will throw — surfaced via `error`.
-    // Keep previous data while refetching to avoid flicker between
-    // "No responses" and "Hidden" states.
-    retry: false,
-    staleTime: 2 * 60_000,
-    gcTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    refetchOnMount: false,
-    placeholderData: (prev) => prev,
-  });
 
   const commentsEnabled = (postQuery.data?.allowedInteractions ?? []).includes('textComment');
   // The server hides comment bodies until reveal (403 while status is
@@ -272,6 +258,8 @@ export default function HiddenDiscussionScreen() {
   // Holding the whole quote (not just an id) lets the composer strip render
   // without hunting through the list for the row again.
   const [replyingTo, setReplyingTo] = useState<CommentQuote | null>(null);
+  // Which "who did this" sheet is open, if any.
+  const [reactorsMode, setReactorsMode] = useState<'likes' | 'reactions' | null>(null);
 
   const startReply = useCallback((c: CommentItem) => {
     setReplyingTo({
@@ -347,37 +335,16 @@ export default function HiddenDiscussionScreen() {
                   onLike={() => likeMutation.mutate()}
                   onRate={(n) => ratingMutation.mutate(n)}
                   onReact={(emoji) => reactionAnyMutation.mutate(emoji)}
+                  onShowLikes={() => setReactorsMode('likes')}
+                  onShowReactions={() => setReactorsMode('reactions')}
                 />
 
-                <ThreadSection
-                  title="Responses"
-                  statusPill={
-                    post.status === 'active'
-                      ? <Pill label="Hidden until reveal" tone="info" />
-                      : <Pill label="Revealed" tone="success" />
-                  }
-                  showTopFilter
-                >
-                  {responsesQuery.isLoading ? (
-                    <View className="py-3 items-center">
-                      <ActivityIndicator color={colors.brand.primary} />
-                    </View>
-                  ) : post.status === 'active' ? (
-                    <Text variant="caption" tone="tertiary" className="mb-2">
-                      {responsesQuery.error instanceof Error
-                        ? responsesQuery.error.message
-                        : 'Responses are hidden until reveal.'}
-                    </Text>
-                  ) : (responsesQuery.data ?? []).length === 0 ? (
-                    <Text variant="caption" tone="tertiary">
-                      No responses yet. Be the first.
-                    </Text>
-                  ) : (
-                    (responsesQuery.data ?? []).map((r) => (
-                      <ThreadRow key={r.id} name={r.authorName ?? 'Anonymous'} body={r.body} createdAt={r.createdAt} />
-                    ))
-                  )}
-                </ThreadSection>
+                {/* NOTE: a "Responses" section used to sit here. It was
+                    unreachable — the screen never had a composer for it, so
+                    it could only ever render "No responses yet. Be the
+                    first." with no way to be the first. Comments cover the
+                    same ground and are actually writable. The backend's
+                    response endpoints are left in place, unused. */}
 
                 {/* Comments only exist when the author enabled them at
                     creation — otherwise the whole section stays off. */}
@@ -485,6 +452,12 @@ export default function HiddenDiscussionScreen() {
       </SafeAreaView>
 
       <ImageViewer visible={viewerUri != null} uri={viewerUri} onClose={() => setViewerUri(null)} />
+
+      <ReactorsSheet
+        postId={postId}
+        mode={reactorsMode}
+        onClose={() => setReactorsMode(null)}
+      />
       <VideoPlayerModal visible={videoUri != null} uri={videoUri} onClose={() => setVideoUri(null)} />
     </View>
   );
@@ -735,11 +708,16 @@ function EngagementBar({
   onLike,
   onRate,
   onReact,
+  onShowLikes,
+  onShowReactions,
 }: {
   post: PostDetail;
   onLike: () => void;
   onRate: (n: number) => void;
   onReact: (emoji: string) => void;
+  /** Long-press handlers — open the "who did this" sheet. */
+  onShowLikes: () => void;
+  onShowReactions: () => void;
 }) {
   const allowed = post.allowedInteractions ?? [];
   const viewerRating = (post as unknown as { viewerRating: number | null }).viewerRating;
@@ -791,8 +769,10 @@ function EngagementBar({
       {allowed.includes('like') ? (
         <Pressable
           onPress={onLike}
+          onLongPress={onShowLikes}
           accessibilityRole="button"
           accessibilityLabel="Like"
+          accessibilityHint="Press and hold to see who liked"
           className="items-center justify-center active:opacity-70"
           hitSlop={8}
         >
@@ -805,9 +785,119 @@ function EngagementBar({
       ) : null}
 
       {allowed.includes('reaction') ? (
-        <ReactionPicker viewerReaction={post.viewerReaction} reactionCount={post.reactionCount} onReact={onReact} />
+        <ReactionPicker
+          viewerReaction={post.viewerReaction}
+          reactionCount={post.reactionCount}
+          onReact={onReact}
+          onLongPress={onShowReactions}
+        />
       ) : null}
     </View>
+  );
+}
+
+/**
+ * Long-press sheet listing who liked, or who reacted with what.
+ *
+ * Server-gated: the endpoint 403s while the post is still active, so the
+ * names stay hidden for exactly as long as everything else does. We render
+ * that refusal as an explanatory line, not an error — it is the expected
+ * state during the discussion phase, not a failure.
+ */
+function ReactorsSheet({
+  postId,
+  mode,
+  onClose,
+}: {
+  postId: string;
+  /** null = closed. 'likes' or 'reactions' picks which list to show. */
+  mode: 'likes' | 'reactions' | null;
+  onClose: () => void;
+}) {
+  const visible = mode !== null;
+  const query = useQuery({
+    queryKey: ['post', postId, 'reactors'],
+    queryFn: () => getPostReactors(postId),
+    enabled: visible,
+    retry: false,
+    staleTime: 30_000,
+  });
+
+  const data = query.data;
+  const rows =
+    mode === 'likes'
+      ? (data?.likes ?? []).map((l) => ({ key: l.userId, name: l.name, emoji: null as string | null }))
+      : (data?.reactions ?? []).map((r) => ({ key: r.userId, name: r.name, emoji: r.emoji }));
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        className="flex-1 items-center justify-center px-6"
+        style={{ backgroundColor: colors.surface.overlay }}
+        onPress={onClose}
+        accessibilityLabel="Close"
+      >
+        {/* Centred card rather than a bottom sheet: the list is short and
+            sits far from the button that opened it, so anchoring it to the
+            bottom edge left it under the thumb and half off-screen on
+            smaller devices. Inner press is swallowed so tapping the card
+            doesn't dismiss it. */}
+        <Pressable
+          onPress={() => {}}
+          className="bg-surface w-full px-5 pt-5 pb-5"
+          style={{ borderRadius: radius.lg, maxWidth: 420, ...elevation[3] }}
+        >
+          <Text variant="h3" tone="primary" className="mb-3">
+            {mode === 'likes' ? 'Liked by' : 'Reactions'}
+          </Text>
+
+          {query.isLoading ? (
+            <View className="py-6 items-center">
+              <ActivityIndicator color={colors.brand.primary} />
+            </View>
+          ) : query.error ? (
+            <Text variant="body" tone="secondary" className="py-4">
+              Hidden until the discussion is revealed.
+            </Text>
+          ) : rows.length === 0 ? (
+            <Text variant="body" tone="secondary" className="py-4">
+              {mode === 'likes' ? 'No likes yet.' : 'No reactions yet.'}
+            </Text>
+          ) : (
+            // maxHeight caps the card's growth so a long list scrolls
+            // inside it instead of pushing the card off-screen.
+            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+              {rows.map((row) => (
+                <View key={row.key} className="flex-row items-center py-2.5">
+                  <View
+                    className="items-center justify-center"
+                    style={{
+                      width: THREAD_AVATAR_SIZE,
+                      height: THREAD_AVATAR_SIZE,
+                      borderRadius: radius.full,
+                      backgroundColor: SUBTLE_PILL_BG,
+                      marginRight: 12,
+                    }}
+                  >
+                    <Text variant="caption" bold tone="primary">
+                      {authorInitials(row.name)}
+                    </Text>
+                  </View>
+                  <Text variant="body" tone="primary" className="flex-1" numberOfLines={1}>
+                    {row.name ?? 'Unknown'}
+                  </Text>
+                  {row.emoji ? (
+                    <Text style={{ fontSize: 20, lineHeight: 26 }}>{row.emoji}</Text>
+                  ) : (
+                    <Ionicons name="heart" size={18} color={colors.semantic.danger} />
+                  )}
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -815,10 +905,13 @@ function ReactionPicker({
   viewerReaction,
   reactionCount,
   onReact,
+  onLongPress,
 }: {
   viewerReaction: string | null;
   reactionCount: number;
   onReact: (emoji: string) => void;
+  /** Opens the "who reacted with what" sheet. */
+  onLongPress: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -826,12 +919,23 @@ function ReactionPicker({
     <View>
       <Pressable
         onPress={() => setOpen((o) => !o)}
+        onLongPress={onLongPress}
         accessibilityRole="button"
         accessibilityLabel="React with emoji"
+        accessibilityHint="Press and hold to see who reacted"
         className="flex-row items-center active:opacity-70"
         hitSlop={8}
       >
-        <Text style={{ fontSize: 24, lineHeight: 30 }}>{viewerReaction ?? '🙂'}</Text>
+        {/* Unpicked, this is the same happy-outline icon the composer shows
+            against the "Reaction" option, so the affordance is recognisable
+            from where it was enabled. Once the viewer has reacted their own
+            emoji replaces it — that IS their reaction, not a generic entry
+            point. */}
+        {viewerReaction ? (
+          <Text style={{ fontSize: 24, lineHeight: 30 }}>{viewerReaction}</Text>
+        ) : (
+          <Ionicons name="happy-outline" size={26} color={colors.text.primary} />
+        )}
         {reactionCount > 0 ? (
           <Text variant="caption" bold tone="primary" className="ml-1">{reactionCount}</Text>
         ) : null}
@@ -880,16 +984,14 @@ function ReactionPicker({
   );
 }
 
-/** Shared thread-section shell: title + optional status pill + optional "Top ∨" filter (static, non-functional per plan). */
+/** Shared thread-section shell: title + optional status pill. */
 function ThreadSection({
   title,
   statusPill,
-  showTopFilter,
   children,
 }: {
   title: string;
   statusPill?: React.ReactNode;
-  showTopFilter?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -900,12 +1002,6 @@ function ThreadSection({
         </Text>
         {statusPill ?? null}
       </View>
-      {showTopFilter ? (
-        <View className="flex-row items-center mb-2">
-          <Text variant="caption" tone="secondary">Top</Text>
-          <Ionicons name="chevron-down" size={14} color={colors.text.secondary} style={{ marginLeft: 2 }} />
-        </View>
-      ) : null}
       {children}
     </View>
   );

@@ -7,6 +7,7 @@ import {
   listComments as listCommentsService,
   listPosts as listPostsService,
   listRatings as listRatingsService,
+  listPostReactors as listPostReactorsService,
   listResponses as listResponsesService,
   listVotes as listVotesService,
   submitRating as submitRatingService,
@@ -240,6 +241,21 @@ export async function getVotes(req: Request, res: Response, next: NextFunction) 
     const user = requireUser(req);
     const { id } = postIdParamSchema.parse(req.params);
     const result = await listVotesService(user.id, id);
+    res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /posts/:id/reactors — who liked, and who reacted with what.
+ * Reveal-gated; 403 while the post is still active.
+ */
+export async function getPostReactors(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = requireUser(req);
+    const { id } = postIdParamSchema.parse(req.params);
+    const result = await listPostReactorsService(user.id, id);
     res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);

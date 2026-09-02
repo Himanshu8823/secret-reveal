@@ -257,6 +257,22 @@ export async function votePoll(postId: string, optionIds: string[]) {
   );
 }
 
+export type PostReactors = {
+  likes: Array<{ userId: string; name: string | null }>;
+  reactions: Array<{ userId: string; name: string | null; emoji: string }>;
+};
+
+/**
+ * Who liked and who reacted. Reveal-gated server-side — throws while the
+ * post is still active, which the caller renders as "hidden until reveal"
+ * rather than as an error.
+ */
+export async function getPostReactors(postId: string): Promise<PostReactors> {
+  return unwrap<PostReactors>(
+    apiClient.get<ApiEnvelope<PostReactors>>(`/posts/${postId}/reactors`),
+  );
+}
+
 export async function getPollResults(postId: string): Promise<PollResults> {
   return unwrap<PollResults>(
     apiClient.get<ApiEnvelope<PollResults>>(`/posts/${postId}/poll`),

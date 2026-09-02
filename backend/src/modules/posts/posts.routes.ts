@@ -21,6 +21,7 @@ import {
   postToggleLike,
   postPollVote,
   getPollResultsHandler,
+  getPostReactors,
 } from './posts.controller.js';
 
 /**
@@ -65,6 +66,8 @@ postsRouter.get('/:id/poll', getPollResultsHandler);
 postsRouter.get('/:id/votes', getVotes);
 postsRouter.post('/:id/ratings', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postRating);
 postsRouter.get('/:id/ratings', getRatings);
+// Who liked / who reacted. Reveal-gated in the service.
+postsRouter.get('/:id/reactors', getPostReactors);
 postsRouter.post('/:id/reactions-any', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postReactionAny);
 postsRouter.post('/:id/likes', rateLimit(postResponseLimiter, (req) => req.user?.id ?? 'unknown'), postToggleLike);
 postsRouter.get('/:id/my-vote', getMyVoteDetail);
