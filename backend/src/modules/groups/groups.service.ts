@@ -73,7 +73,16 @@ export async function listMyGroups(input: ListMyGroupsInput): Promise<ListMyGrou
     orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
     take: limit + 1,
     include: {
-      _count: { select: { members: true, posts: true } },
+      // postCount must agree with what listPosts actually returns, which
+      // filters out soft-deleted rows (posts.service.ts). An unfiltered
+      // _count counts deleted posts too, so a group that had a post
+      // deleted reported a higher number than the list underneath it.
+      _count: {
+        select: {
+          members: true,
+          posts: { where: { status: { not: 'deleted' } } },
+        },
+      },
     },
   });
 
@@ -119,7 +128,9 @@ export async function getGroup(
         },
         orderBy: { joinedAt: 'asc' },
       },
-      _count: { select: { posts: true } },
+      // Same filter as listMyGroups — soft-deleted posts must not inflate
+      // the header count above the number of posts actually listed.
+      _count: { select: { posts: { where: { status: { not: 'deleted' } } } } },
     },
   });
   if (!group) {

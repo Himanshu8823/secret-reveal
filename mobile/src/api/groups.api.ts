@@ -1,10 +1,13 @@
 import { apiClient, unwrap } from './client';
 import type { ApiEnvelope } from '../features/auth/types';
 
+// NOTE: no `createdById` here. A group IS its member set — there is no
+// owner or creator column in the schema, and the API never sent one. The
+// field was declared as a non-optional string but always arrived
+// undefined, so anything trusting it would have read a lie.
 export type GroupSummary = {
   id: string;
   name: string;
-  createdById: string;
   lastActivityAt: string;
   createdAt: string;
   memberCount: number;
@@ -20,10 +23,17 @@ export type ListGroupsResponse = {
 export type GroupDetail = {
   id: string;
   name: string;
-  createdById: string;
   lastActivityAt: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Number of non-deleted posts in the group. The backend has always sent
+   * this (groups.service.getGroup); it was missing from this type, so the
+   * detail screen reached it through an `as unknown as` cast and fell back
+   * to the length of the currently-loaded page — showing "0 posts" until
+   * the first page arrived, and undercounting once it did.
+   */
+  postCount: number;
   members: Array<{
     userId: string;
     name: string | null;

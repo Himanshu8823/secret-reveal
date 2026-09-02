@@ -1,7 +1,7 @@
-import { Pressable, View } from 'react-native';
-import { Image } from 'expo-image';
+import { Pressable, View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text, Pill } from './ui';
+import { MediaTile } from './MediaTile';
 import { elevation, radius, colors } from '../theme';
 import { avatarColorFor } from '../utils/avatarColor';
 import type { PostSummary } from '../api/posts.api';
@@ -31,7 +31,10 @@ type Props = {
 export function PostCard({ post, onPress }: Props) {
   const initials = authorInitials(post.author.name);
   const avatarColor = avatarColorFor(post.author.id);
-  const firstImageMedia = post.media.find((m) => m.mimeType.startsWith('image/'));
+  // Preview whatever the post actually leads with — previously this only
+  // looked for images, so video/audio/PDF posts rendered no preview at all.
+  const firstMedia = post.media[0];
+  const extraCount = post.media.length - 1;
 
   return (
     <Pressable
@@ -88,18 +91,22 @@ export function PostCard({ post, onPress }: Props) {
         {post.caption}
       </Text>
 
-      {/* First image (if any) */}
-      {firstImageMedia ? (
-        // expo-image reads dimensions from `style`, not NativeWind's
-        // className, and uses `contentFit` rather than RN's `resizeMode`.
-        <Image
-          source={{ uri: firstImageMedia.url }}
-          style={{ width: '100%', aspectRatio: 16 / 9, borderRadius: radius.md, marginBottom: 12 }}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={200}
-          recyclingKey={firstImageMedia.id}
-        />
+      {/* Lead attachment preview — image, video poster, or a document card. */}
+      {firstMedia ? (
+        <View style={{ marginBottom: 12 }}>
+          <MediaTile
+            url={firstMedia.url}
+            mimeType={firstMedia.mimeType}
+            recyclingKey={firstMedia.id}
+          />
+          {extraCount > 0 ? (
+            <View style={styles.moreBadge}>
+              <Text variant="caption" bold tone="onDark">
+                +{extraCount}
+              </Text>
+            </View>
+          ) : null}
+        </View>
       ) : null}
 
       {/* Timer badge + counts */}
@@ -187,4 +194,16 @@ function authorInitials(name: string | null): string {
     (parts[0]?.[0] ?? '?') + (parts[1]?.[0] ?? '?')
   ).toUpperCase();
 }
+
+const styles = StyleSheet.create({
+  moreBadge: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 9999,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+});
 

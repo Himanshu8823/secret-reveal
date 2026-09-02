@@ -33,7 +33,27 @@ export type AuthBootState =
   | { state: 'unauthenticated' }
   | { state: 'offline'; error: unknown };
 
-export async function bootstrapAuth(): Promise<AuthBootState> {
+let bootInFlight: Promise<AuthBootState> | null = null;
+
+/**
+ * Cold-start bootstrap, de-duplicated.
+ *
+ * React 18 strict-mode double-invokes effects in dev, and a retry from the
+ * offline screen can overlap an in-flight boot. Two concurrent bootstraps
+ * both read the SAME refresh token and both POST /auth/refresh — the second
+ * one replays a token the first already consumed, which the backend reads
+ * as token reuse and punishes by revoking the entire token family. That
+ * wiped the session on restart. One shared promise means one rotation.
+ */
+export function bootstrapAuth(): Promise<AuthBootState> {
+  if (bootInFlight) return bootInFlight;
+  bootInFlight = runBootstrap().finally(() => {
+    bootInFlight = null;
+  });
+  return bootInFlight;
+}
+
+async function runBootstrap(): Promise<AuthBootState> {
   const refreshToken = await getRefreshToken();
   if (!refreshToken) {
     // No persisted token AND no persisted user means this is a genuinely

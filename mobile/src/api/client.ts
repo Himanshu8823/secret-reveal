@@ -18,6 +18,23 @@ export const apiClient = axios.create({
   headers: { 'content-type': 'application/json' },
 });
 
+/**
+ * Interceptor-free instance for the auth endpoints themselves.
+ *
+ * /auth/refresh must NEVER go through the 401-retry interceptor below: a
+ * 401 from the refresh call means "this refresh token is dead", not
+ * "mint a new access token". Routing it through apiClient made the
+ * interceptor fire tryRefresh() on the failure of a refresh, spending a
+ * second rotation on a token the server had already rejected/consumed.
+ * The backend reads that replay as token reuse and revokes the whole
+ * family (token.service.ts), which signed the user out on every restart.
+ */
+export const authClient = axios.create({
+  baseURL,
+  timeout: 15_000,
+  headers: { 'content-type': 'application/json' },
+});
+
 apiClient.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
   if (token) {
@@ -48,15 +65,27 @@ async function tryRefresh(): Promise<string | null> {
       }
       return accessToken;
     } catch (e) {
-      // Only wipe on auth errors (401 / TOKEN_INVALID). Network / 5xx
-      // should preserve the token so next cold-start can retry.
-      const status = (e as { response?: { status?: number } })?.response?.status;
-      const code = (e as { code?: string })?.code;
+      // Only wipe on auth errors. Network / 5xx must preserve the token so
+      // the next cold start can retry — see boot.ts's isAuthError.
+      //
+      // NOTE: unwrap() re-throws a plain Error carrying `status`, `code`
+      // and `isNetworkError`; it does NOT preserve `e.response`. Reading
+      // `e.response.status` here therefore always saw `undefined`, so a
+      // server-sent 401 was only caught via `code`. Read the flattened
+      // fields that unwrap actually sets.
+      const err = e as {
+        code?: string;
+        status?: number;
+        isNetworkError?: boolean;
+        response?: { status?: number };
+      };
+      // Server never answered — nothing was rejected, so keep the token.
       const isAuth =
-        status === 401 ||
-        code === 'TOKEN_INVALID' ||
-        code === 'TOKEN_EXPIRED' ||
-        code === 'UNAUTHENTICATED';
+        !err.isNetworkError &&
+        ((err.status ?? err.response?.status) === 401 ||
+          err.code === 'TOKEN_INVALID' ||
+          err.code === 'TOKEN_EXPIRED' ||
+          err.code === 'UNAUTHENTICATED');
       if (isAuth) {
         // Clear the user blob alongside the token — leaving a stored user
         // behind with no token is the orphan state boot.ts has to special

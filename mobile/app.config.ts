@@ -23,6 +23,7 @@ const config: ExpoConfig = {
     // No custom icon/color override — falls back to the app icon until a
     // dedicated notification-icon asset is designed.
     'expo-notifications',
+    'expo-video',
   ],
   experiments: {
     typedRoutes: false,

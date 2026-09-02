@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   TextInput,
   Pressable,
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
@@ -18,6 +18,8 @@ import { colors, radius, elevation } from '../../../src/theme';
 import { avatarColorFor } from '../../../src/utils/avatarColor';
 import { Text, Pill } from '../../../src/components/ui';
 import { ImageViewer } from '../../../src/components/ImageViewer';
+import { VideoPlayerModal } from '../../../src/components/VideoPlayerModal';
+import { MediaTile } from '../../../src/components/MediaTile';
 import { useRefreshOnFocus } from '../../../src/hooks/useRefreshOnFocus';
 import {
   createComment as createCommentApi,
@@ -30,7 +32,6 @@ import {
   voteYesNo,
   type CommentItem,
   type PostDetail,
-  type PostMediaItem,
 } from '../../../src/api/posts.api';
 
 /**
@@ -253,6 +254,19 @@ export default function HiddenDiscussionScreen() {
 
   const [commentDraft, setCommentDraft] = useState('');
   const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+
+  // Images open the zoomable viewer, videos the player. Audio and PDFs
+  // have no in-app viewer yet, so they hand off to the OS.
+  const openMedia = useCallback((uri: string, mimeType: string) => {
+    if (mimeType.startsWith('image/')) {
+      setViewerUri(uri);
+    } else if (mimeType.startsWith('video/')) {
+      setVideoUri(uri);
+    } else {
+      void Linking.openURL(uri);
+    }
+  }, []);
 
   const isInitialLoad = postQuery.isLoading && !postQuery.data;
 
@@ -291,7 +305,7 @@ export default function HiddenDiscussionScreen() {
               </View>
             ) : post ? (
               <>
-                <PostHeader post={post} countdownText={countdownText} onPressImage={setViewerUri} />
+                <PostHeader post={post} countdownText={countdownText} onOpenMedia={openMedia} />
                 <EngagementBar
                   post={post}
                   onLike={() => likeMutation.mutate()}
@@ -380,6 +394,7 @@ export default function HiddenDiscussionScreen() {
       </SafeAreaView>
 
       <ImageViewer visible={viewerUri != null} uri={viewerUri} onClose={() => setViewerUri(null)} />
+      <VideoPlayerModal visible={videoUri != null} uri={videoUri} onClose={() => setVideoUri(null)} />
     </View>
   );
 }
@@ -387,15 +402,14 @@ export default function HiddenDiscussionScreen() {
 function PostHeader({
   post,
   countdownText,
-  onPressImage,
+  onOpenMedia,
 }: {
   post: PostDetail;
   countdownText: string;
-  onPressImage: (uri: string) => void;
+  onOpenMedia: (uri: string, mimeType: string) => void;
 }) {
   const initials = authorInitials(post.authorName);
   const avatarColor = avatarColorFor(post.authorId);
-  const firstMedia = post.media?.[0];
   const isRevealed = post.status === 'revealed';
 
   return (
@@ -441,8 +455,20 @@ function PostHeader({
         </Text>
       </View>
 
-      {/* Media (single full-width preview, 16:9) */}
-      {firstMedia ? <MediaPreview item={firstMedia} onPressImage={onPressImage} /> : null}
+      {/* Every attachment, not just the first — a post can carry up to 5. */}
+      {post.media.length > 0 ? (
+        <View className="gap-2 mt-1 mb-1">
+          {post.media.map((m) => (
+            <MediaTile
+              key={m.id}
+              url={m.url}
+              mimeType={m.mimeType}
+              recyclingKey={m.id}
+              onPress={() => onOpenMedia(m.url, m.mimeType)}
+            />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -750,48 +776,6 @@ function ReplyComposer({
         </Text>
       ) : null}
     </View>
-  );
-}
-
-function MediaPreview({ item, onPressImage }: { item: PostMediaItem; onPressImage: (uri: string) => void }) {
-  const isImage = item.mimeType.startsWith('image/');
-  return (
-    <Pressable
-      onPress={isImage ? () => onPressImage(item.url) : undefined}
-      accessibilityRole={isImage ? 'button' : 'image'}
-      accessibilityLabel={isImage ? 'Open image full screen' : 'Attached media'}
-      className="w-full aspect-[16/9] overflow-hidden mt-1 mb-1"
-      style={{ backgroundColor: colors.surface.bg, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
-    >
-      {isImage ? (
-        // expo-image needs a real style for its dimensions — NativeWind's
-        // className doesn't reach it, so w-full/h-full collapsed the image
-        // to zero size and nothing rendered.
-        <Image
-          source={{ uri: item.url }}
-          style={{ width: '100%', height: '100%' }}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={200}
-          // Decode off the UI thread and hold a low-res placeholder until
-          // the full image lands, so scrolling stays smooth.
-          priority="normal"
-          recyclingKey={item.id}
-        />
-      ) : (
-        <View className="flex-1 items-center justify-center" style={{ backgroundColor: colors.surface.bg }}>
-          <MaterialCommunityIcons
-            name={
-              item.mimeType.startsWith('video/') ? 'play-circle-outline'
-              : item.mimeType.startsWith('audio/') ? 'music-note-outline'
-              : 'file-document-outline'
-            }
-            size={36}
-            color={colors.brand.primary}
-          />
-        </View>
-      )}
-    </Pressable>
   );
 }
 

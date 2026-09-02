@@ -106,10 +106,17 @@ function avatarPalette(name: string): [string, string, string] {
 }
 
 /**
- * Last-post preview line. In v1 the API returns `latestPost: null` for every
- * group, so we show a sensible placeholder rather than a blank string.
+ * Sub-line under the group name: post count · member count.
+ *
+ * This used to branch on `group.latestPost`, but the API hardcodes that to
+ * null for every group (Phase 3a will populate it), so the "No posts yet"
+ * branch was unreachable-by-default and every group claimed to be empty
+ * regardless of how many posts it actually had. `postCount` is real data,
+ * so we drive the line off that instead and keep "No posts yet" for the
+ * case it actually describes.
  */
 function previewFor(group: GroupSummary): string {
-  if (!group.latestPost) return `No posts yet · ${group.memberCount} member${group.memberCount === 1 ? '' : 's'}`;
-  return 'Latest post preview';
+  const members = `${group.memberCount} member${group.memberCount === 1 ? '' : 's'}`;
+  if (group.postCount === 0) return `No posts yet · ${members}`;
+  return `${group.postCount} post${group.postCount === 1 ? '' : 's'} · ${members}`;
 }

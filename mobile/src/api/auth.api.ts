@@ -1,4 +1,4 @@
-import { apiClient, unwrap } from './client';
+import { apiClient, authClient, unwrap } from './client';
 import type {
   ApiEnvelope,
   RequestOtpResponse,
@@ -47,8 +47,12 @@ export async function verifyOtp(input: {
 export async function refresh(input: {
   refreshToken: string;
 }): Promise<VerifyOtpResponse> {
+  // authClient, NOT apiClient: a 401 here means the refresh token is dead.
+  // Sending it through the 401-retry interceptor would make that failure
+  // trigger another refresh, replaying a consumed token and tripping the
+  // backend's reuse detection (which revokes the whole token family).
   return unwrap<VerifyOtpResponse>(
-    apiClient.post<ApiEnvelope<VerifyOtpResponse>>('/auth/refresh', input),
+    authClient.post<ApiEnvelope<VerifyOtpResponse>>('/auth/refresh', input),
   );
 }
 
@@ -57,5 +61,6 @@ export async function refresh(input: {
  * invalid or expired. Returns void; the caller clears local state regardless.
  */
 export async function logout(input: { refreshToken: string }): Promise<void> {
-  await apiClient.post('/auth/logout', input);
+  // Same reasoning as refresh(): logout must not re-enter the refresh flow.
+  await authClient.post('/auth/logout', input);
 }

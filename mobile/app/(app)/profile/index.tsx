@@ -10,6 +10,7 @@ import { getMe, getMyStats } from '../../../src/api/users.api';
 import { useAuth } from '../../../src/features/auth/hooks/useAuth';
 import { useAvatarUpload } from '../../../src/features/profile/useAvatarUpload';
 import { useRefreshOnFocus } from '../../../src/hooks/useRefreshOnFocus';
+import { ProfileSkeleton, Skeleton } from '../../../src/components/skeleton/Skeleton';
 import { clearRefreshToken } from '../../../src/utils/secureStorage';
 import { useAuthStore } from '../../../src/store/authStore';
 import { colors } from '../../../src/theme';
@@ -63,6 +64,22 @@ export default function ProfileScreen() {
   const storeUser = useAuthStore((s) => s.user);
   const user = profileQuery.data ?? storeUser ?? undefined;
 
+  // Skeleton only on a true cold render — when there is nothing at all to
+  // paint. The cached `storeUser` normally carries name/username/avatar, so
+  // gating on `profileQuery.isLoading` alone would flash a skeleton over
+  // content we can already show, which reads worse than a brief stale value.
+  // Stats have no cached fallback, so they get their own check below.
+  const showProfileSkeleton = !user && profileQuery.isLoading;
+  const showStatsPlaceholder = !statsQuery.data && statsQuery.isLoading;
+
+  // createdAt only exists on the server's UserProfile, never on the cached
+  // authStore user. Parse defensively — an unparseable value must not
+  // render "Invalid Date".
+  const rawCreatedAt = (user as unknown as { createdAt?: string })?.createdAt;
+  const parsedCreatedAt = rawCreatedAt ? new Date(rawCreatedAt) : null;
+  const joinedAt =
+    parsedCreatedAt && !Number.isNaN(parsedCreatedAt.getTime()) ? parsedCreatedAt : null;
+
   const onChangeAvatar = () => {
     pickAndUpload({
       source: 'gallery',
@@ -89,106 +106,125 @@ export default function ProfileScreen() {
         contentContainerClassName="pb-32"
         showsVerticalScrollIndicator={false}
       >
-        {/* Avatar + identity */}
-        <View className="items-center pt-8 pb-4">
-          <AvatarWithCamera
-            avatarUrl={user?.avatarUrl}
-            size={110}
-            cameraSize={36}
-            busy={avatarBusy}
-            onCameraPress={onChangeAvatar}
-          />
+        {showProfileSkeleton ? (
+          <ProfileSkeleton />
+        ) : (
+          <>
+            {/* Avatar + identity */}
+            <View className="items-center pt-8 pb-4">
+              <AvatarWithCamera
+                avatarUrl={user?.avatarUrl}
+                size={110}
+                cameraSize={36}
+                busy={avatarBusy}
+                onCameraPress={onChangeAvatar}
+              />
 
-          {user?.name?.trim() ? (
-            <Text variant="h2" tone="primary" className="mt-4 text-center">
-              {user.name}
-            </Text>
-          ) : null}
+              {user?.name?.trim() ? (
+                <Text variant="h2" tone="primary" className="mt-4 text-center">
+                  {user.name}
+                </Text>
+              ) : null}
 
-          {user?.username ? (
-            <Text
-              variant="caption"
-              tone="secondary"
-              className="mt-1 text-center"
-            >
-              @{user.username}
-            </Text>
-          ) : null}
+              {user?.username ? (
+                <Text variant="caption" tone="secondary" className="mt-1 text-center">
+                  @{user.username}
+                </Text>
+              ) : null}
 
-          <View className="mt-5">
-            <Button
-              label="Edit Profile"
-              variant="secondary"
-              size="md"
-              fullWidth={false}
-              onPress={() => router.push('/(app)/profile/edit')}
-            />
-          </View>
-        </View>
+              <View className="mt-5">
+                <Button
+                  label="Edit Profile"
+                  variant="secondary"
+                  size="md"
+                  fullWidth={false}
+                  onPress={() => router.push('/(app)/profile/edit')}
+                />
+              </View>
+            </View>
 
-        {/* Stats row */}
-        <View className="flex-row px-4 gap-3 mt-2">
-          <View className="flex-1 bg-surface-muted rounded-lg p-4">
-            <Text variant="h2" tone="primary" className="text-center">
-              {statsQuery.data?.posts ?? 0}
-            </Text>
-            <Text variant="caption" tone="secondary" className="text-center mt-1">
-              Posts
-            </Text>
-          </View>
-          <View className="flex-1 bg-surface-muted rounded-lg p-4">
-            <Text variant="h2" tone="primary" className="text-center">
-              {statsQuery.data?.activeGroups ?? 0}
-            </Text>
-            <Text variant="caption" tone="secondary" className="text-center mt-1">
-              Active Groups
-            </Text>
-          </View>
-        </View>
+            {/* Stats row. While the counts are still loading we show a bar in
+            place of the number rather than `0` — a real-looking zero that
+            then jumps to another value reads as a bug, an obvious
+            placeholder does not. The labels stay put so only the numeral
+            swaps. */}
+            <View className="flex-row px-4 gap-3 mt-2">
+              <View className="flex-1 bg-surface-muted rounded-lg p-4">
+                {showStatsPlaceholder ? (
+                  <View className="items-center" style={{ height: 28, justifyContent: 'center' }}>
+                    <Skeleton width={40} height={22} />
+                  </View>
+                ) : (
+                  <Text variant="h2" tone="primary" className="text-center">
+                    {statsQuery.data?.posts ?? 0}
+                  </Text>
+                )}
+                <Text variant="caption" tone="secondary" className="text-center mt-1">
+                  Posts
+                </Text>
+              </View>
+              <View className="flex-1 bg-surface-muted rounded-lg p-4">
+                {showStatsPlaceholder ? (
+                  <View className="items-center" style={{ height: 28, justifyContent: 'center' }}>
+                    <Skeleton width={40} height={22} />
+                  </View>
+                ) : (
+                  <Text variant="h2" tone="primary" className="text-center">
+                    {statsQuery.data?.activeGroups ?? 0}
+                  </Text>
+                )}
+                <Text variant="caption" tone="secondary" className="text-center mt-1">
+                  Active Groups
+                </Text>
+              </View>
+            </View>
 
-        {/* About Me section — always renders. Empty bio shows a soft
+            {/* About Me section — always renders. Empty bio shows a soft
             placeholder so the section never disappears (matches the
             reference layout — it's a permanent slot, not conditional).
             The "Joined" line below it is also unconditional — every
             profile has a join date, so hiding it when bio is empty was
             wrong. */}
-        <View className="px-4 mt-6">
-          <Text variant="bodyStrong" tone="primary" className="mb-2">
-            About Me
-          </Text>
-          <Text
-            variant="body"
-            tone={user?.bio && user.bio.trim().length > 0 ? 'secondary' : 'tertiary'}
-          >
-            {user?.bio && user.bio.trim().length > 0
-              ? user.bio
-              : 'Tell people a bit about yourself — tap Edit Profile to add a bio.'}
-          </Text>
-          <View className="flex-row items-center mt-3">
-            <MaterialCommunityIcons
-              name="calendar"
-              size={14}
-              color={colors.text.tertiary}
-            />
-            <Text variant="caption" tone="tertiary" className="ml-1.5">
-              Joined{' '}
-              {new Date((user as unknown as { createdAt?: string })?.createdAt ?? Date.now()).toLocaleString('en-US', {
-                month: 'long',
-                year: 'numeric',
-              })}
-            </Text>
-          </View>
-        </View>
+            <View className="px-4 mt-6">
+              <Text variant="bodyStrong" tone="primary" className="mb-2">
+                About Me
+              </Text>
+              <Text
+                variant="body"
+                tone={user?.bio && user.bio.trim().length > 0 ? 'secondary' : 'tertiary'}
+              >
+                {user?.bio && user.bio.trim().length > 0
+                  ? user.bio
+                  : 'Tell people a bit about yourself — tap Edit Profile to add a bio.'}
+              </Text>
+              {/* Joined date. Only the server's UserProfile carries createdAt —
+              the cached authStore user does not, and defaulting to
+              Date.now() printed today's date as though it were the real
+              join date. Show a placeholder bar until the value exists. */}
+              <View className="flex-row items-center mt-3">
+                <MaterialCommunityIcons name="calendar" size={14} color={colors.text.tertiary} />
+                {joinedAt ? (
+                  <Text variant="caption" tone="tertiary" className="ml-1.5">
+                    Joined{' '}
+                    {joinedAt.toLocaleString('en-US', {
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </Text>
+                ) : (
+                  <View className="ml-1.5">
+                    <Skeleton width={128} height={16} />
+                  </View>
+                )}
+              </View>
+            </View>
+          </>
+        )}
 
         {/* Sign out — sits below the scrollable content area, separated
             by a top divider so the destructive action is visually distinct. */}
         <View className="px-4 mt-10 pt-6 border-t border-border">
-          <Button
-            label="Sign out"
-            variant="danger"
-            size="lg"
-            onPress={onSignOut}
-          />
+          <Button label="Sign out" variant="danger" size="lg" onPress={onSignOut} />
         </View>
       </ScrollView>
 

@@ -132,7 +132,7 @@ export default function GroupDetailScreen() {
           </Text>
           <Text variant="meta" tone="secondary" className="mt-0.5">
             {group
-              ? `${group.members.length} member${group.members.length === 1 ? '' : 's'} · ${(group as unknown as { postCount?: number }).postCount ?? posts.length} posts`
+              ? `${group.members.length} member${group.members.length === 1 ? '' : 's'} · ${group.postCount} post${group.postCount === 1 ? '' : 's'}`
               : ' '}
           </Text>
         </View>
