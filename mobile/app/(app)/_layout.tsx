@@ -7,6 +7,8 @@ import { useRealtimeNotifications } from '../../src/hooks/useRealtimeNotificatio
 import { usePushRegistration } from '../../src/hooks/usePushRegistration';
 import { useRefreshOnFocus } from '../../src/hooks/useRefreshOnFocus';
 import { getUnreadNotificationCount } from '../../src/api/notifications.api';
+import { getMe } from '../../src/api/users.api';
+import { setStoredUser } from '../../src/utils/secureStorage';
 
 /**
  * App shell tab nav — Phase 3. Four tabs:
@@ -41,12 +43,91 @@ export default function AppLayout() {
   useRefreshOnFocus(['notifications', 'unread-count']);
   const unreadCount = unreadQuery.data?.count ?? 0;
 
+  // Cached-onboarding revalidation query — declared unconditionally
+  // (rules of hooks) even though it's only meaningful once `user` exists
+  // and looks incomplete; `enabled` gates whether it actually fires.
+  const cachedNeedsOnboarding =
+    !user || !user.name || user.name.trim() === '' || !user.username || user.username.trim() === '';
+
+  const revalidateQuery = useQuery({
+    queryKey: ['users', 'me', 'onboarding-revalidate'],
+    queryFn: getMe,
+    enabled: Boolean(user) && cachedNeedsOnboarding && Boolean(accessToken),
+    staleTime: 0,
+    retry: false,
+  });
+
   // Guard the authenticated shell on the USER, not the access token: a
   // cold start with no network restores the user from secure storage with
   // a null token on purpose (see boot.ts). Gating on the token would bounce
   // that perfectly valid session straight back to login.
   if (!user) {
     return <Redirect href="/(auth)/login" />;
+  }
+
+  // A brand-new user's session is set (setSession in useAuth.ts) the
+  // instant OTP verification succeeds — before verify-otp.tsx's own
+  // `router.replace('/(auth)/welcome')` runs. Because that setSession call
+  // makes (auth)/_layout.tsx's own guard (`if (user) redirect to /(app)`)
+  // true first, its redirect wins the race and lands here with no name/
+  // username set, and welcome.tsx never mounts. This is the same
+  // "needsName" check verify-otp.tsx uses — duplicated here as a backstop
+  // so onboarding can't be skipped no matter which navigation wins the
+  // race, or which screen (deep link, cold start) is the entry point.
+  //
+  // Known failure mode this guards against: the in-memory `user` here can
+  // come from the OFFLINE cold-start fallback (boot.ts restores a cached
+  // SecureStore blob when /auth/refresh can't be reached). That cached
+  // blob is a hand-mirrored copy of the server's user row, written by
+  // welcome.tsx/link-phone.tsx on submit — if that on-device write was
+  // ever interrupted (app killed mid-write, an earlier test run, etc.) it
+  // can go stale and read as "still needs onboarding" even though the
+  // server-side profile is actually complete. Cheap self-correction: only
+  // when we DO have a live access token (i.e. this isn't the genuinely
+  // offline case) and the cached user looks incomplete, do one GET
+  // /users/me round-trip before trusting that verdict — a live network
+  // was available, so this resolves the false positive in one request
+  // instead of stranding the user on the welcome screen.
+  if (cachedNeedsOnboarding && accessToken) {
+    if (revalidateQuery.isLoading) {
+      // Brief wait for the one-shot revalidation before committing to a
+      // redirect — avoids a visible welcome-screen flash for a stale cache.
+      return null;
+    }
+    if (revalidateQuery.data) {
+      const server = revalidateQuery.data;
+      const serverNeedsOnboarding =
+        !server.name || server.name.trim() === '' || !server.username || server.username.trim() === '';
+      if (!serverNeedsOnboarding) {
+        // The server disagrees with the stale cache — it's the source of
+        // truth. Repair the local copies so this doesn't recur, and fall
+        // through to render the app shell below instead of redirecting.
+        const freshUser = {
+          id: server.id,
+          phone: server.phone,
+          name: server.name,
+          username: server.username,
+          avatarUrl: server.avatarUrl,
+          bio: server.bio,
+        };
+        useAuthStore.getState().setSession({
+          accessToken,
+          user: freshUser,
+          isNewUser: false,
+        });
+        setStoredUser(freshUser).catch(() => undefined);
+      } else {
+        return <Redirect href="/(auth)/welcome" />;
+      }
+    } else if (revalidateQuery.isError) {
+      // Revalidation failed (network blip, 401, etc.) — fall back to the
+      // cached verdict rather than blocking forever.
+      return <Redirect href="/(auth)/welcome" />;
+    }
+  } else if (cachedNeedsOnboarding) {
+    // No access token — this is the genuinely-offline cold start. Nothing
+    // to revalidate against; trust the cache as before.
+    return <Redirect href="/(auth)/welcome" />;
   }
 
   return (
@@ -120,8 +201,6 @@ export default function AppLayout() {
       <Tabs.Screen name="create" options={{ href: null }} />
       <Tabs.Screen name="group/[id]" options={{ href: null }} />
       <Tabs.Screen name="post/[id]" options={{ href: null }} />
-      {/* Create-group route — same pattern as the post composer. */}
-      <Tabs.Screen name="groups/new" options={{ href: null }} />
       {/* NOTE: profile/edit is NOT declared here — it lives inside
           app/(app)/profile/_layout.tsx Stack (index + edit). Declaring it
           here duplicates the route and throws "[Layout children]: Too many

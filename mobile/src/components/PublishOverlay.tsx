@@ -96,7 +96,7 @@ export function PublishOverlay({ phase }: { phase: PublishPhase }) {
         style={{ backgroundColor: colors.surface.overlay }}
       >
         <Animated.View
-          className="items-center bg-surface px-9 py-9"
+          className="items-center bg-surface px-8 py-8"
           style={{
             borderRadius: radius.lg,
             minWidth: 240,

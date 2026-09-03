@@ -14,8 +14,11 @@ export type VerifyOtpInput = {
 
 export type AuthUser = {
   id: string;
-  phone: string;
+  phone: string | null;
   name: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
 };
 
 export type VerifyOtpResult = {
@@ -23,4 +26,14 @@ export type VerifyOtpResult = {
   accessToken: string;
   refreshToken: string;
   user: AuthUser;
+};
+
+/**
+ * Result of POST /auth/google. Same shape as VerifyOtpResult plus
+ * `needsPhone` — true when the account has no verified phone yet, which
+ * the client uses to route straight to the phone-link onboarding step
+ * instead of (or before) the name/username welcome screen.
+ */
+export type GoogleSignInResult = VerifyOtpResult & {
+  needsPhone: boolean;
 };

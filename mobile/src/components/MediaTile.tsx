@@ -67,7 +67,11 @@ export function MediaTile({ url, mimeType, name, recyclingKey, onPress, fill }: 
 
   const frameStyle = fill
     ? ({ width: '100%', height: '100%' } as const)
-    : ({ width: '100%', aspectRatio: 16 / 9 } as const);
+    // PDF card is a single icon+filename row, not a media frame — the
+    // shared 16:9 box left a lot of empty space under it.
+    : kind === 'pdf'
+      ? ({ width: '100%', height: 72 } as const)
+      : ({ width: '100%', aspectRatio: 16 / 9 } as const);
 
   return (
     <Pressable

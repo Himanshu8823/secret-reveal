@@ -5,6 +5,13 @@ import type { ApiEnvelope } from '../features/auth/types';
 // owner or creator column in the schema, and the API never sent one. The
 // field was declared as a non-optional string but always arrived
 // undefined, so anything trusting it would have read a lie.
+export type GroupMemberPreview = {
+  userId: string;
+  name: string | null;
+  phone: string | null;
+  joinedAt: string;
+};
+
 export type GroupSummary = {
   id: string;
   name: string;
@@ -13,6 +20,9 @@ export type GroupSummary = {
   memberCount: number;
   postCount: number;
   latestPost: null;
+  /** First few members (join order) — real identities for the row's
+   *  avatar-stack, not a name-derived guess. */
+  memberPreview: GroupMemberPreview[];
 };
 
 export type ListGroupsResponse = {

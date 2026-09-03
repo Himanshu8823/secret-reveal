@@ -38,7 +38,7 @@ import {
  * so the service contract is explicit.
  */
 
-function requireUser(req: Request): { id: string; phone: string } {
+function requireUser(req: Request): { id: string; phone: string | null } {
   if (!req.user) {
     // requireAuth guarantees this; defensive throw that the central error
     // handler maps to the standard envelope.

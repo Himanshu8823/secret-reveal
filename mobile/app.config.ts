@@ -24,6 +24,19 @@ const config: ExpoConfig = {
     // dedicated notification-icon asset is designed.
     'expo-notifications',
     'expo-video',
+    [
+      'expo-image-picker',
+      {
+        photosPermission: 'Allow $(PRODUCT_NAME) to access your photos to set an avatar or attach media to a post.',
+        cameraPermission: 'Allow $(PRODUCT_NAME) to use your camera to take a photo for your avatar or a post.',
+      },
+    ],
+    [
+      'expo-document-picker',
+      {
+        iCloudContainerEnvironment: 'Production',
+      },
+    ],
   ],
   experiments: {
     typedRoutes: false,

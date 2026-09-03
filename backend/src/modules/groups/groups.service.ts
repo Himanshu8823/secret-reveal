@@ -83,6 +83,13 @@ export async function listMyGroups(input: ListMyGroupsInput): Promise<ListMyGrou
           posts: { where: { status: { not: 'deleted' } } },
         },
       },
+      // First 3 members (by join order) for the row's avatar-stack preview.
+      // Real identities, not a name-derived guess.
+      members: {
+        take: 3,
+        orderBy: { joinedAt: 'asc' },
+        include: { user: { select: { id: true, name: true, phone: true } } },
+      },
     },
   });
 
@@ -104,6 +111,12 @@ export async function listMyGroups(input: ListMyGroupsInput): Promise<ListMyGrou
     memberCount: g._count.members,
     postCount: g._count.posts,
     latestPost: null,
+    memberPreview: g.members.map((m) => ({
+      userId: m.user.id,
+      name: m.user.name,
+      phone: m.user.phone,
+      joinedAt: m.joinedAt,
+    })),
   }));
 
   return { groups, nextCursor };
@@ -250,6 +263,11 @@ export async function findOrCreateGroupByMembers(
       lastActivityAt: true,
       createdAt: true,
       _count: { select: { members: true, posts: true } },
+      members: {
+        take: 3,
+        orderBy: { joinedAt: 'asc' },
+        include: { user: { select: { id: true, name: true, phone: true } } },
+      },
     },
   });
   if (existing) {
@@ -262,6 +280,12 @@ export async function findOrCreateGroupByMembers(
         memberCount: existing._count.members,
         postCount: existing._count.posts,
         latestPost: null,
+        memberPreview: existing.members.map((m) => ({
+          userId: m.user.id,
+          name: m.user.name,
+          phone: m.user.phone,
+          joinedAt: m.joinedAt,
+        })),
       },
       created: false,
     };
@@ -310,6 +334,7 @@ export async function findOrCreateGroupByMembers(
     lastActivityAt: Date;
     createdAt: Date;
     _count: { members: number; posts: number };
+    members: Array<{ joinedAt: Date; user: { id: string; name: string | null; phone: string | null } }>;
   };
   try {
     createdRow = await prisma.$transaction(async (tx) => {
@@ -327,6 +352,11 @@ export async function findOrCreateGroupByMembers(
           lastActivityAt: true,
           createdAt: true,
           _count: { select: { members: true, posts: true } },
+          members: {
+            take: 3,
+            orderBy: { joinedAt: 'asc' },
+            include: { user: { select: { id: true, name: true, phone: true } } },
+          },
         },
       });
 
@@ -369,6 +399,11 @@ export async function findOrCreateGroupByMembers(
           lastActivityAt: true,
           createdAt: true,
           _count: { select: { members: true, posts: true } },
+          members: {
+            take: 3,
+            orderBy: { joinedAt: 'asc' },
+            include: { user: { select: { id: true, name: true, phone: true } } },
+          },
         },
       });
       if (raced) {
@@ -381,6 +416,12 @@ export async function findOrCreateGroupByMembers(
             memberCount: raced._count.members,
             postCount: raced._count.posts,
             latestPost: null,
+            memberPreview: raced.members.map((m) => ({
+              userId: m.user.id,
+              name: m.user.name,
+              phone: m.user.phone,
+              joinedAt: m.joinedAt,
+            })),
           },
           created: false,
         };
@@ -403,6 +444,12 @@ export async function findOrCreateGroupByMembers(
       memberCount: createdRow._count.members,
       postCount: createdRow._count.posts,
       latestPost: null,
+      memberPreview: createdRow.members.map((m) => ({
+        userId: m.user.id,
+        name: m.user.name,
+        phone: m.user.phone,
+        joinedAt: m.joinedAt,
+      })),
     },
     created: true,
   };

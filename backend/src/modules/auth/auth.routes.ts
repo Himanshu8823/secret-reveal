@@ -1,12 +1,24 @@
 import { Router } from 'express';
-import { postRequestOtp, postVerifyOtp, postRefresh, postLogout } from './auth.controller.js';
+import {
+  postRequestOtp,
+  postVerifyOtp,
+  postRefresh,
+  postLogout,
+  postGoogleSignIn,
+  postRequestPhoneLink,
+  postVerifyPhoneLink,
+} from './auth.controller.js';
 import {
   otpRequestByPhoneLimiter,
   otpRequestByIpLimiter,
   otpVerifyByPhoneLimiter,
   refreshLimiter,
+  googleSignInLimiter,
+  phoneLinkRequestLimiter,
+  phoneLinkVerifyLimiter,
   rateLimit,
 } from '../../middlewares/rateLimiter.js';
+import { requireAuth } from '../../middlewares/auth.js';
 
 /**
  * Auth routes. Rate limits are composed per-route (not global) so future
@@ -52,3 +64,34 @@ authRouter.post(
  */
 authRouter.post('/refresh', rateLimit(refreshLimiter, (req) => req.ip ?? 'unknown'), postRefresh);
 authRouter.post('/logout', postLogout);
+
+/**
+ * Google sign-in. Rate-limited by IP only — there's no phone/email in the
+ * body to key on before the token is verified, and the verification call
+ * itself (network round-trip to Google's JWK cache) already bounds abuse
+ * cost per request.
+ */
+authRouter.post(
+  '/google',
+  rateLimit(googleSignInLimiter, (req) => req.ip ?? 'unknown'),
+  postGoogleSignIn,
+);
+
+/**
+ * Phone-link (post-Google-signup onboarding). Both routes require an
+ * authenticated caller — you can only attach a phone to your OWN account.
+ * Rate-limited by user id (the resource being mutated) same as the OTP
+ * login routes are keyed by phone.
+ */
+authRouter.post(
+  '/phone/link/request',
+  requireAuth,
+  rateLimit(phoneLinkRequestLimiter, (req) => req.user?.id ?? 'unknown'),
+  postRequestPhoneLink,
+);
+authRouter.post(
+  '/phone/link/verify',
+  requireAuth,
+  rateLimit(phoneLinkVerifyLimiter, (req) => req.user?.id ?? 'unknown'),
+  postVerifyPhoneLink,
+);

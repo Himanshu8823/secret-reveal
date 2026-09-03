@@ -85,5 +85,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   playerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  player: { width: '100%', aspectRatio: 16 / 9 },
+  // Fill the available space instead of capping at a 16:9 box — on a
+  // taller-than-16:9 phone screen that box left large empty bars above
+  // and below. `contentFit="contain"` on the VideoView still preserves
+  // the video's real aspect ratio inside this larger area.
+  player: { width: '100%', height: '100%' },
 });

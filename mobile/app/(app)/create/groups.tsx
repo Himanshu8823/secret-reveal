@@ -233,10 +233,10 @@ export default function CreateGroupsScreen() {
                 const displayName = person.name ?? person.username ?? 'Unknown';
                 const isAdded = invitees.some((i) => i.id === person.id);
                 return (
-                  <View key={person.id} className="flex-row items-center py-3 px-3.5 border-b border-border" style={{ borderBottomWidth: 0.5 }}>
+                  <View key={person.id} className="flex-row items-center py-3 px-5 border-b border-border" style={{ borderBottomWidth: 0.5 }}>
                     <View className="w-9 h-9 rounded-full items-center justify-center mr-3 bg-primary-subtle"><Text variant="bodyStrong" tone="primary">{displayName.slice(0, 1).toUpperCase()}</Text></View>
-                    <Text variant="body" bold className="flex-1 mr-3" numberOfLines={1}>{displayName}</Text>
-                    <Pressable onPress={() => toggleInvitee(person.id, displayName)} className={['px-3 py-2 rounded-sm border', isAdded ? 'bg-primary-subtle border-primary' : 'bg-surface border-border'].join(' ')}>
+                    <Text variant="body" bold className="flex-1 mr-3" numberOfLines={1} style={{ maxWidth: '60%' }}>{displayName}</Text>
+                    <Pressable onPress={() => toggleInvitee(person.id, displayName)} className={['px-3 py-2 rounded-sm border shrink-0', isAdded ? 'bg-primary-subtle border-primary' : 'bg-surface border-border'].join(' ')}>
                       <Text variant="caption" bold tone="primary">{isAdded ? 'Added' : 'Add'}</Text>
                     </Pressable>
                   </View>

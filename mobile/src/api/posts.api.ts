@@ -279,6 +279,35 @@ export async function getPollResults(postId: string): Promise<PollResults> {
   );
 }
 
+export type PostRatingRow = {
+  userId: string;
+  name: string | null;
+  value: number;
+  createdAt: string;
+};
+
+/** Who rated what. Reveal-gated server-side — 403s while the post is active. */
+export async function getPostRatings(postId: string): Promise<PostRatingRow[]> {
+  return unwrap<PostRatingRow[]>(
+    apiClient.get<ApiEnvelope<PostRatingRow[]>>(`/posts/${postId}/ratings`),
+  );
+}
+
+export type PostVoteRow = {
+  userId: string;
+  name: string | null;
+  optionId: string;
+  optionLabel: string;
+  createdAt: string;
+};
+
+/** Who voted for which poll option. Reveal-gated server-side — 403s while the post is active. */
+export async function getPostVotes(postId: string): Promise<PostVoteRow[]> {
+  return unwrap<PostVoteRow[]>(
+    apiClient.get<ApiEnvelope<PostVoteRow[]>>(`/posts/${postId}/votes`),
+  );
+}
+
 export async function ratePost(postId: string, value: number) {
   return unwrap<unknown>(apiClient.post<ApiEnvelope<unknown>>(`/posts/${postId}/ratings`, { value }));
 }

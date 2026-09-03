@@ -18,6 +18,15 @@ const envSchema = z.object({
   OTP_PROVIDER: z.enum(['mock']).default('mock'),
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
 
+  // Google Sign-In. The backend verifies ID tokens against these audiences
+  // (google-auth-library checks the token's `aud` claim is one of them).
+  // Optional so a fresh clone without Google configured still boots — the
+  // /auth/google route rejects with a clear error if none are set, rather
+  // than crashing at startup.
+  GOOGLE_IOS_CLIENT_ID: z.string().optional(),
+  GOOGLE_ANDROID_CLIENT_ID: z.string().optional(),
+  GOOGLE_WEB_CLIENT_ID: z.string().optional(),
+
   APP_NAME: z.string().min(1).default('Secretsuper'),
 
   // S3-compatible object storage. Supabase Storage uses the S3 API at a

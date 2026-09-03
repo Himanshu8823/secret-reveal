@@ -3,6 +3,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { GroupSummary } from '../api/groups.api';
 import { Text } from './ui';
 import { formatRelative } from '../utils/formatRelative';
+import { avatarColorFor } from '../utils/avatarColor';
 
 type Props = {
   group: GroupSummary;
@@ -15,12 +16,22 @@ type Props = {
  *   [AvatarStack: 3 overlapping circles]  [GroupName]   [3h]
  *                                            [last post preview]
  *
- * Member avatar URLs aren't in the API yet — fall back to initials in
- * deterministically-coloured circles (one colour per row).
+ * The stack renders the group's actual first members (`memberPreview`),
+ * one circle per real person — colour keyed off their user id via
+ * `avatarColorFor`, same as every other avatar in the app, not a
+ * name-derived guess repeated three times. Member avatar photo URLs
+ * aren't in the API yet, so each circle still falls back to initials.
  */
 export function GroupRow({ group, onPress }: Props) {
-  const initials = nameInitials(group.name);
-  const colors3 = avatarPalette(group.name);
+  // Defensive fallback: memberPreview is always populated server-side (a
+  // group always has at least the viewer), but a stale cached response
+  // from before this field existed would otherwise render an empty stack.
+  const previewMembers =
+    group.memberPreview.length > 0
+      ? group.memberPreview.slice(0, 3)
+      : [{ userId: group.id, name: group.name, phone: null, joinedAt: group.createdAt }];
+  const overflowCount = group.memberCount - previewMembers.length;
+  const offsets = [0, 14, 28];
 
   return (
     <Pressable
@@ -30,30 +41,21 @@ export function GroupRow({ group, onPress }: Props) {
       accessibilityLabel={`Open group ${group.name}`}
     >
       <View className="relative w-16 h-8 mr-3">
-        <View
-          className="absolute top-0 left-0 w-8 h-8 rounded-full border-2 border-surface items-center justify-center"
-          style={{ backgroundColor: colors3[0] }}
-        >
-          <Text variant="caption" tone="onDark" bold>
-            {initials[0]}
-          </Text>
-        </View>
-        <View
-          className="absolute top-0 left-4 w-8 h-8 rounded-full border-2 border-surface items-center justify-center"
-          style={{ backgroundColor: colors3[1] }}
-        >
-          <Text variant="caption" tone="onDark" bold>
-            {initials[1] ?? initials[0]}
-          </Text>
-        </View>
-        <View
-          className="absolute top-0 left-8 w-8 h-8 rounded-full border-2 border-surface items-center justify-center"
-          style={{ backgroundColor: colors3[2] }}
-        >
-          <Text variant="caption" tone="onDark" bold>
-            {group.memberCount > 3 ? `+${group.memberCount - 2}` : initials[2] ?? initials[0]}
-          </Text>
-        </View>
+        {previewMembers.map((member, i) => {
+          const isLast = i === previewMembers.length - 1;
+          const label = isLast && overflowCount > 0 ? `+${overflowCount}` : nameInitials(member.name)[0];
+          return (
+            <View
+              key={member.userId}
+              className="absolute top-0 w-8 h-8 rounded-full border-2 border-surface items-center justify-center"
+              style={{ left: offsets[i], backgroundColor: avatarColorFor(member.userId) }}
+            >
+              <Text variant="caption" tone="onDark" bold>
+                {label}
+              </Text>
+            </View>
+          );
+        })}
       </View>
 
       <View className="flex-1 min-w-0">
@@ -79,30 +81,13 @@ export function GroupRow({ group, onPress }: Props) {
   );
 }
 
-/** Up to two initials for the avatar stack. */
-function nameInitials(name: string): string[] {
-  const trimmed = name.trim();
+/** Up to two initials for one avatar circle. */
+function nameInitials(name: string | null): string[] {
+  const trimmed = (name ?? '').trim();
   if (!trimmed) return ['?'];
   const parts = trimmed.split(/\s+/);
   if (parts.length === 1) return [parts[0][0]?.toUpperCase() ?? '?'];
   return [(parts[0][0] ?? '?').toUpperCase(), (parts[1][0] ?? '?').toUpperCase()];
-}
-
-/** Deterministic three-colour palette from the group name (stable hash). */
-function avatarPalette(name: string): [string, string, string] {
-  const palette = [
-    ['#0B49FA', '#7A4DFF', '#22C7B7'],
-    ['#22C7B7', '#0B49FA', '#FFB020'],
-    ['#7A4DFF', '#FF3D7F', '#0B49FA'],
-    ['#FFB020', '#0B49FA', '#7A4DFF'],
-    ['#FF3D7F', '#22C7B7', '#0B49FA'],
-  ];
-  let h = 0;
-  for (let i = 0; i < name.length; i += 1) {
-    h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  }
-  const pick = palette[h % palette.length];
-  return [pick[0], pick[1], pick[2]] as [string, string, string];
 }
 
 /**

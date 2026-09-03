@@ -9,7 +9,8 @@
 export type GroupMemberSummary = {
   userId: string;
   name: string | null;
-  phone: string;
+  // Null for a Google-signup member who hasn't linked a phone yet.
+  phone: string | null;
   joinedAt: Date;
 };
 
@@ -22,6 +23,10 @@ export type GroupSummary = {
   postCount: number;
   // Phase 3a populates this; for now the column is null.
   latestPost: null;
+  // First few members (by join order), for the avatar-stack preview on the
+  // group list row. Real member identities, not a `memberCount`-derived
+  // guess — the client used to fake this stack from the group name alone.
+  memberPreview: GroupMemberSummary[];
 };
 
 export type GroupWithMembers = {

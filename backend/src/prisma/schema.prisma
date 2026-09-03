@@ -12,8 +12,18 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(uuid()) @db.Uuid
-  phone         String   @unique
+  id       String  @id @default(uuid()) @db.Uuid
+  // Nullable: a Google-only signup has no phone until it completes the
+  // link-phone onboarding step (see modules/auth/phone-link.service.ts).
+  // Still unique — once set, no two users can share a phone.
+  phone    String? @unique
+  // Nullable: only present for accounts created (or linked) via Google.
+  // Unique so the same Google account can't back two users.
+  email    String? @unique
+  // Google's stable per-account identifier ("sub" claim). Unique and
+  // separate from email because email can theoretically change on
+  // Google's side; we look up by googleId first, email second.
+  googleId String? @unique
   name          String?
   username      String?  @unique
   avatarUrl     String?  @db.VarChar(512)

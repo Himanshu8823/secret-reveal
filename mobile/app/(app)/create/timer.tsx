@@ -5,6 +5,7 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -30,7 +31,7 @@ const PRESETS: Preset[] = [
   { key: 'custom', minutes: null, label: 'Custom', sub: 'Set your own duration' },
 ];
 
-const CUSTOM_MIN = 5;
+const CUSTOM_MIN = 2;
 const CUSTOM_MAX = 1440;
 
 export default function CreateTimerScreen() {
@@ -109,7 +110,11 @@ export default function CreateTimerScreen() {
           </View>
         </View>
 
-        <View className="flex-1 p-4 pt-6">
+        <ScrollView
+          className="flex-1"
+          contentContainerClassName="p-4 pt-6"
+          keyboardShouldPersistTaps="handled"
+        >
           <Text variant="h2" className="mb-1.5">Set Result Timer</Text>
           <Text variant="body" tone="secondary" className="mb-6">
             After this time, responses become visible to everyone.
@@ -150,7 +155,7 @@ export default function CreateTimerScreen() {
             })}
 
             {selected === 'custom' ? (
-              <View className="px-4 pt-2">
+              <View className="pt-2">
                 <Text variant="caption" tone="secondary" className="mb-2">Minutes</Text>
                 <View className="border border-primary rounded-md bg-surface py-3 px-4">
                   <TextInput
@@ -172,7 +177,7 @@ export default function CreateTimerScreen() {
               </View>
             ) : null}
           </View>
-        </View>
+        </ScrollView>
 
         <View className="px-4 pt-3 pb-2">
           <Button

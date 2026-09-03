@@ -32,8 +32,9 @@ import { GroupRowSkeleton } from '../../src/components/skeleton/Skeleton';
  * If both lists are empty, a single EmptyState fills the screen with a
  * pointer to the FAB. Pull-to-refresh refreshes both queries.
  *
- * The FAB stays bottom-right (unchanged from the Phase 2 placeholder) and
- * opens the create-group route at /(app)/groups/new.
+ * There is no standalone "create group" screen — groups are only ever
+ * created as part of the post composer (/(app)/create), same as before.
+ * The FAB here opens that composer, same as every other tab's FAB.
  */
 export default function GroupsScreen() {
   const queryClient = useQueryClient();
@@ -181,8 +182,8 @@ export default function GroupsScreen() {
       )}
 
       <Fab
-        onPress={() => router.push('/(app)/groups/new')}
-        accessibilityLabel="Create group"
+        onPress={() => router.push('/(app)/create')}
+        accessibilityLabel="Create post"
       />
     </SafeAreaView>
   );

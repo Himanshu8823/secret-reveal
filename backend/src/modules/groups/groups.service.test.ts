@@ -20,6 +20,10 @@ vi.mock('../../config/db.js', () => ({
       create: vi.fn(),
       delete: vi.fn(),
     },
+    groupInvite: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+    },
     $transaction: vi.fn(),
   },
 }));

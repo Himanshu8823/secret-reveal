@@ -8,7 +8,9 @@
  */
 export type UserProfile = {
   id: string;
-  phone: string;
+  // Null for a Google-signup that hasn't completed phone-link onboarding
+  // yet (see modules/auth/phone-link.service.ts).
+  phone: string | null;
   name: string | null;
   username: string | null;
   avatarUrl: string | null;

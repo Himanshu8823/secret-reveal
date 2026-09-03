@@ -1187,10 +1187,27 @@ export async function listVotes(viewerId: string, postId: string) {
   });
   if (!membership) throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member');
   if (post.status === 'active') throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'Votes are hidden until reveal');
-  // Raw poll rows, post-reveal only. Callers that want tallies should use
-  // getPollResults instead — this stays row-level for parity with the
-  // other list* helpers.
-  return prisma.pollVote.findMany({ where: { postId }, orderBy: { createdAt: 'asc' } });
+  // Row-level, post-reveal only. Callers that only want tallies should use
+  // getPollResults instead — this is for "who voted for what", so each row
+  // carries the voter's name and the option they picked.
+  const votes = await prisma.pollVote.findMany({
+    where: { postId },
+    select: {
+      userId: true,
+      optionId: true,
+      createdAt: true,
+      user: { select: { name: true } },
+      option: { select: { label: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  return votes.map((v) => ({
+    userId: v.userId,
+    name: v.user.name,
+    optionId: v.optionId,
+    optionLabel: v.option.label,
+    createdAt: v.createdAt,
+  }));
 }
 
 /**
@@ -1249,5 +1266,15 @@ export async function listRatings(viewerId: string, postId: string) {
   });
   if (!membership) throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'You are not a member');
   if (post.status === 'active') throw new AppError(403, ErrorCode.VALIDATION_FAILED, 'Ratings are hidden until reveal');
-  return prisma.rating.findMany({ where: { postId }, orderBy: { createdAt: 'asc' } });
+  const ratings = await prisma.rating.findMany({
+    where: { postId },
+    select: { userId: true, value: true, createdAt: true, user: { select: { name: true } } },
+    orderBy: { createdAt: 'asc' },
+  });
+  return ratings.map((r) => ({
+    userId: r.userId,
+    name: r.user.name,
+    value: r.value,
+    createdAt: r.createdAt,
+  }));
 }

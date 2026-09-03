@@ -32,9 +32,13 @@ import {
   votePoll,
   getPollResults,
   getPostReactors,
+  getPostRatings,
+  getPostVotes,
   type CommentItem,
   type CommentQuote,
   type PostDetail,
+  type PostSummary,
+  type ListPostsResponse,
 } from '../../../src/api/posts.api';
 import { RATING_SCALE } from '../../../src/store/composerStore';
 
@@ -71,6 +75,42 @@ const SUBTLE_PILL_BG = colors.brand.primarySubtle;
 
 const EMOJI_PICKER = ['❤️', '😂', '🔥', '🙏', '😮', '😢', '👍', '👏', '🎉', '😍', '🤔', '👌'];
 
+// A tapped PostCard already has almost everything this screen needs to
+// paint (caption, media, counts, author) — it just came from a feed list
+// query. Without a placeholder, this screen showed a blank/skeleton state
+// on every open and re-fetched from scratch, even though the same data was
+// on screen a moment ago in the feed. Reshape whatever summary we can find
+// in the feed/group-posts caches into a PostDetail-shaped stand-in so the
+// first paint is instant; the real getPost() request still runs and
+// overwrites it — this is a placeholder, not a substitute for fresh data.
+function summaryToDetailPlaceholder(summary: PostSummary): PostDetail {
+  return {
+    id: summary.id,
+    authorId: summary.author.id,
+    authorName: summary.author.name,
+    groupId: summary.groupId,
+    groupName: summary.groupName,
+    caption: summary.caption,
+    status: summary.status,
+    allowedInteractions: summary.allowedInteractions,
+    // Not present on the feed summary — unknown until the real fetch lands.
+    ratingScale: null,
+    createdAt: summary.createdAt,
+    updatedAt: summary.createdAt,
+    media: summary.media,
+    discussionMeta: summary.discussionMeta,
+    responseCount: summary.responseCount,
+    reactionCount: summary.reactionCount,
+    commentCount: summary.commentCount,
+    likeCount: summary.likeCount,
+    viewerReaction: summary.viewerReaction,
+    viewerLiked: summary.viewerLiked,
+    // Not present on the feed summary — unknown until the real fetch lands.
+    viewerPollOptionIds: [],
+    viewerRating: null,
+  };
+}
+
 export default function HiddenDiscussionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const postId = id ?? '';
@@ -82,6 +122,30 @@ export default function HiddenDiscussionScreen() {
     enabled: Boolean(postId),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+    placeholderData: (previous) => {
+      // A previously loaded post (navigated away and back) always wins —
+      // it's strictly more complete than a re-derived feed summary.
+      if (previous) return previous;
+      if (!postId) return undefined;
+      // Check every feed-shaped cache this app populates: the home feed,
+      // and each group's post list (['group', groupId, 'posts'] — NOT
+      // ['group', groupId] alone, which is the group *detail* query and
+      // has no `posts` array at all; matching that prefix would find a
+      // GroupDetail object here instead of a post list). Whichever one
+      // the user actually tapped from will have it; the others are cheap
+      // no-op lookups.
+      const caches = queryClient.getQueriesData<ListPostsResponse>({ queryKey: ['posts', 'feed'] });
+      const groupCaches = queryClient
+        .getQueryCache()
+        .findAll({ queryKey: ['group'] })
+        .filter((q) => q.queryKey.length === 3 && q.queryKey[2] === 'posts')
+        .map((q) => q.state.data as ListPostsResponse | undefined);
+      for (const data of [...caches.map(([, d]) => d), ...groupCaches]) {
+        const match = data?.posts.find((p) => p.id === postId);
+        if (match) return summaryToDetailPlaceholder(match);
+      }
+      return undefined;
+    },
   });
 
 
@@ -338,6 +402,10 @@ export default function HiddenDiscussionScreen() {
                   onShowLikes={() => setReactorsMode('likes')}
                   onShowReactions={() => setReactorsMode('reactions')}
                 />
+
+                {post.allowedInteractions?.includes('rating') && post.status === 'revealed' ? (
+                  <RatingsList postId={postId} />
+                ) : null}
 
                 {/* NOTE: a "Responses" section used to sit here. It was
                     unreachable — the screen never had a composer for it, so
@@ -694,6 +762,70 @@ function PollBlock({
           );
         })}
       </View>
+
+      {revealed ? <PollVotersList postId={postId} /> : null}
+    </View>
+  );
+}
+
+/**
+ * Who voted for what, shown once a poll is revealed — same row shape as the
+ * ratings list: avatar, name, time, then the option they picked.
+ */
+function PollVotersList({ postId }: { postId: string }) {
+  const votesQuery = useQuery({
+    queryKey: ['post', postId, 'votes'],
+    queryFn: () => getPostVotes(postId),
+    staleTime: 30_000,
+  });
+
+  const votes = votesQuery.data ?? [];
+
+  if (votesQuery.isLoading) {
+    return (
+      <View className="py-3 items-center">
+        <ActivityIndicator color={colors.brand.primary} />
+      </View>
+    );
+  }
+  if (votes.length === 0) return null;
+
+  return (
+    <View className="mt-3 pt-3" style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: BORDER }}>
+      <Text variant="caption" bold tone="secondary" className="mb-1.5">
+        Votes
+      </Text>
+      {votes.map((v) => (
+        <View key={`${v.userId}-${v.optionId}`} className="flex-row items-center py-2">
+          <View
+            className="items-center justify-center"
+            style={{
+              width: THREAD_AVATAR_SIZE,
+              height: THREAD_AVATAR_SIZE,
+              borderRadius: radius.full,
+              backgroundColor: SUBTLE_PILL_BG,
+              marginRight: 12,
+            }}
+          >
+            <Text variant="caption" bold tone="primary">
+              {authorInitials(v.name)}
+            </Text>
+          </View>
+          <View className="flex-1 min-w-0">
+            <View className="flex-row items-center flex-wrap">
+              <Text variant="bodyStrong" tone="primary" numberOfLines={1}>
+                {v.name ?? 'Unknown'}
+              </Text>
+              <Text variant="meta" tone="tertiary" className="ml-2">
+                {formatRelativeTime(v.createdAt)}
+              </Text>
+            </View>
+            <Text variant="caption" tone="secondary" numberOfLines={1} className="mt-0.5">
+              {v.optionLabel}
+            </Text>
+          </View>
+        </View>
+      ))}
     </View>
   );
 }
@@ -792,6 +924,80 @@ function EngagementBar({
           onLongPress={onShowReactions}
         />
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * Who rated what, shown once the post is revealed — sits directly below
+ * the engagement bar's rating stars, same row shape as the poll voters
+ * list: avatar, name, time, then that person's filled stars.
+ */
+function RatingsList({ postId }: { postId: string }) {
+  const ratingsQuery = useQuery({
+    queryKey: ['post', postId, 'ratings'],
+    queryFn: () => getPostRatings(postId),
+    staleTime: 30_000,
+  });
+
+  const ratings = ratingsQuery.data ?? [];
+
+  if (ratingsQuery.isLoading) {
+    return (
+      <View className="py-3 items-center">
+        <ActivityIndicator color={colors.brand.primary} />
+      </View>
+    );
+  }
+  if (ratings.length === 0) return null;
+
+  return (
+    <View
+      className="pt-3 pb-1 mb-1"
+      style={{ borderBottomWidth: StyleSheet.hairlineWidth, borderColor: BORDER }}
+    >
+      <Text variant="caption" bold tone="secondary" className="mb-1.5">
+        Ratings
+      </Text>
+      {ratings.map((r) => (
+        <View key={r.userId} className="flex-row items-center py-2">
+          <View
+            className="items-center justify-center"
+            style={{
+              width: THREAD_AVATAR_SIZE,
+              height: THREAD_AVATAR_SIZE,
+              borderRadius: radius.full,
+              backgroundColor: SUBTLE_PILL_BG,
+              marginRight: 12,
+            }}
+          >
+            <Text variant="caption" bold tone="primary">
+              {authorInitials(r.name)}
+            </Text>
+          </View>
+          <View className="flex-1 min-w-0">
+            <View className="flex-row items-center flex-wrap">
+              <Text variant="bodyStrong" tone="primary" numberOfLines={1}>
+                {r.name ?? 'Unknown'}
+              </Text>
+              <Text variant="meta" tone="tertiary" className="ml-2">
+                {formatRelativeTime(r.createdAt)}
+              </Text>
+            </View>
+            <View className="flex-row items-center mt-0.5">
+              {Array.from({ length: RATING_SCALE }, (_, i) => i + 1).map((n) => (
+                <Ionicons
+                  key={n}
+                  name={n <= r.value ? 'star' : 'star-outline'}
+                  size={14}
+                  color={n <= r.value ? colors.brand.accentAmber : colors.text.tertiary}
+                  style={{ marginRight: 1 }}
+                />
+              ))}
+            </View>
+          </View>
+        </View>
+      ))}
     </View>
   );
 }
@@ -1189,13 +1395,7 @@ function ReplyComposer({
         editable={!isPending}
         accessibilityLabel={accessibilityLabel}
       />
-      <View className="flex-row items-center justify-between">
-        <View className="flex-row items-center gap-4">
-          <Pressable accessibilityRole="button" accessibilityLabel="Attach image" className="w-8 h-8 items-center justify-center active:opacity-70">
-            <MaterialCommunityIcons name="image-outline" size={20} color={ICON_MUTED} />
-          </Pressable>
-        </View>
-
+      <View className="flex-row items-center justify-end">
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Send"

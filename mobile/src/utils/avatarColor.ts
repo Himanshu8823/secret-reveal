@@ -7,12 +7,9 @@ import { colors } from '../theme';
  * a mistake.
  */
 const LIGHT_PALETTE = [
-  '#FFE8CC', // light orange (derived from brand.accentAmber)
-  '#FFE8CC',
-  '#FFE8CC',
-  colors.pill.successBg, // light green
-  colors.pill.infoBg, // light blue
-  colors.pill.warningBg, // light yellow
+  '#FFB020', // orange
+  '#7A4DFF', // purple
+  '#1B5E20', // dark green
 ];
 
 /** Deterministic pick from the light palette, stable per seed (e.g. user id). */

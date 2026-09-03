@@ -46,3 +46,28 @@ export const logoutSchema = z.object({
   refreshToken: z.string().min(10),
 });
 export type LogoutBody = z.infer<typeof logoutSchema>;
+
+/**
+ * Request body for POST /auth/google.
+ * The mobile app runs the OAuth flow and hands us only the resulting
+ * Google ID token — the backend verifies it server-side (see
+ * google.service.ts). We never accept a client-asserted email/name here.
+ */
+export const googleSignInSchema = z.object({
+  idToken: z.string().min(10, 'idToken required'),
+});
+export type GoogleSignInBody = z.infer<typeof googleSignInSchema>;
+
+/**
+ * Request body for POST /auth/phone/link/request and .../verify — same
+ * phone shape as login, plus an OTP on the verify step. Separate schemas
+ * (not reused from requestOtpSchema/verifyOtpSchema) so the two flows can
+ * diverge later without one edit rippling into the other.
+ */
+export const requestPhoneLinkSchema = phoneRawShapeSchema;
+export type RequestPhoneLinkBody = z.infer<typeof requestPhoneLinkSchema>;
+
+export const verifyPhoneLinkSchema = phoneRawShapeSchema.extend({
+  otp: z.string().regex(/^\d{6}$/, 'OTP must be exactly 6 digits'),
+});
+export type VerifyPhoneLinkBody = z.infer<typeof verifyPhoneLinkSchema>;

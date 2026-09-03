@@ -4,7 +4,10 @@ import { env } from '../config/env.js';
 
 export type AccessTokenPayload = {
   sub: string; // user id
-  phone: string;
+  // Null until the user completes phone onboarding (Google-only signups
+  // start without one). Present so downstream code never needs a DB round
+  // trip just to know whether the caller has a verified phone yet.
+  phone: string | null;
   type: 'access';
 };
 

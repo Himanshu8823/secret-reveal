@@ -1,7 +1,7 @@
 import { View, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Button, Text, useDialog } from '../../../src/components/ui';
 import { Fab } from '../../../src/components/Fab';
@@ -11,9 +11,11 @@ import { useAuth } from '../../../src/features/auth/hooks/useAuth';
 import { useAvatarUpload } from '../../../src/features/profile/useAvatarUpload';
 import { useRefreshOnFocus } from '../../../src/hooks/useRefreshOnFocus';
 import { ProfileSkeleton, Skeleton } from '../../../src/components/skeleton/Skeleton';
-import { clearRefreshToken } from '../../../src/utils/secureStorage';
+import { getRefreshToken, clearAllAuthData } from '../../../src/utils/secureStorage';
 import { useAuthStore } from '../../../src/store/authStore';
 import { colors } from '../../../src/theme';
+import { logout } from '../../../src/api/auth.api';
+import { unregisterPushToken } from '../../../src/api/notifications.api';
 
 /**
  * Profile screen. Single source of truth for the user's own profile —
@@ -38,6 +40,7 @@ export default function ProfileScreen() {
   const { signOut } = useAuth();
   const dialog = useDialog();
   const { pickAndUpload, busy: avatarBusy } = useAvatarUpload();
+  const queryClient = useQueryClient();
 
   const profileQuery = useQuery({
     queryKey: ['users', 'me'],
@@ -94,8 +97,26 @@ export default function ProfileScreen() {
   };
 
   const onSignOut = async () => {
-    await clearRefreshToken();
+    // Revoke server-side before wiping local state — the refresh token is
+    // only readable from secure storage until clearAllAuthData() runs.
+    // Both calls are best-effort: logout() always 204s per its own doc
+    // comment, and a push-token that was never registered (or a network
+    // failure) must never block the user from getting signed out locally.
+    const refreshToken = await getRefreshToken();
+    await Promise.all([
+      refreshToken ? logout({ refreshToken }).catch(() => undefined) : Promise.resolve(),
+      unregisterPushToken().catch(() => undefined),
+    ]);
+    await clearAllAuthData();
     signOut();
+    // Wipe every cached query — the QueryClient lives for the whole app
+    // process (one instance created in app/_layout.tsx), so without this
+    // the next user to sign in on this device sees the previous user's
+    // cached posts/groups/profile render instantly (stale data from the
+    // old cache) until each query's background refetch catches up. Query
+    // keys here aren't scoped by user id, so this is the only thing that
+    // actually isolates one session's data from the next.
+    queryClient.clear();
     router.replace('/(auth)/login');
   };
 
