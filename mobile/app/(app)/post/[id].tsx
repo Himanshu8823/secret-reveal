@@ -69,7 +69,6 @@ const REPLY_AVATAR_SIZE = 24;
 
 const BORDER = colors.border.DEFAULT;
 const MUTED_BG = colors.surface.muted;
-const ICON_MUTED = colors.text.tertiary;
 const ERROR_COLOR = colors.semantic.danger;
 const SUBTLE_PILL_BG = colors.brand.primarySubtle;
 
@@ -123,9 +122,14 @@ export default function HiddenDiscussionScreen() {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     placeholderData: (previous) => {
-      // A previously loaded post (navigated away and back) always wins —
-      // it's strictly more complete than a re-derived feed summary.
-      if (previous) return previous;
+      // `previous` is whatever this query last resolved to — including a
+      // DIFFERENT post's detail when the user just navigated from post A
+      // to post B (TanStack Query v5 hands the prior query's data across
+      // a key change here, that's how `keepPreviousData` was replaced).
+      // Without this id check, opening B showed A's stale content until
+      // the real fetch for B landed. Only reuse it when it's actually
+      // this post — e.g. navigated away and back to the same one.
+      if (previous && previous.id === postId) return previous;
       if (!postId) return undefined;
       // Check every feed-shaped cache this app populates: the home feed,
       // and each group's post list (['group', groupId, 'posts'] — NOT
@@ -163,7 +167,11 @@ export default function HiddenDiscussionScreen() {
     staleTime: 30_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
-    placeholderData: (prev) => prev,
+    // Guard against showing the PREVIOUS post's comments while this one's
+    // are still loading — same cross-key placeholder issue as postQuery
+    // above. Only reuse `prev` when every comment in it actually belongs
+    // to this post.
+    placeholderData: (prev) => (prev && prev.every((c) => c.postId === postId) ? prev : undefined),
   });
 
   // Refresh when the user comes back to this post from another screen
