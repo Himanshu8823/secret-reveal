@@ -181,20 +181,6 @@ export default function HiddenDiscussionScreen() {
   useRefreshOnFocus(['post', postId, 'responses']);
   useRefreshOnFocus(['post', postId, 'comments']);
 
-  const [now, setNow] = useState<number>(() => Date.now());
-
-  // Countdown tick — for v1 we just re-render every second. Phase 4
-  // replaces this with the shared `useCountdown` hook.
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const countdownText = useMemo(
-    () => formatCountdown(postQuery.data, now),
-    [postQuery.data, now],
-  );
-
   const post = postQuery.data;
 
   const reactionAnyMutation = useMutation({
@@ -393,7 +379,7 @@ export default function HiddenDiscussionScreen() {
               </View>
             ) : post ? (
               <>
-                <PostHeader post={post} countdownText={countdownText} onOpenMedia={openMedia} />
+                <PostHeader post={post} onOpenMedia={openMedia} />
                 {post.allowedInteractions?.includes('poll') ? (
                   <PollBlock
                     postId={postId}
@@ -539,13 +525,43 @@ export default function HiddenDiscussionScreen() {
   );
 }
 
+/**
+ * Ticking "time until reveal" text. Owns its own second-by-second interval
+ * so only this small pill re-renders every tick — it used to live in the
+ * screen component itself, which re-rendered the whole post (comment
+ * thread, media, engagement bar, everything) once a second.
+ */
+function CountdownPill({ revealEndsAt }: { revealEndsAt: string | null }) {
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const countdownText = useMemo(() => formatCountdown(revealEndsAt, now), [revealEndsAt, now]);
+
+  return (
+    <Text
+      variant="caption"
+      bold
+      tone="primary"
+      numberOfLines={1}
+      style={{
+        fontVariant: ['tabular-nums'],
+        fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+      }}
+    >
+      {countdownText}
+    </Text>
+  );
+}
+
 function PostHeader({
   post,
-  countdownText,
   onOpenMedia,
 }: {
   post: PostDetail;
-  countdownText: string;
   onOpenMedia: (uri: string, mimeType: string) => void;
 }) {
   const initials = authorInitials(post.authorName);
@@ -573,18 +589,22 @@ function PostHeader({
           </Text>
         </View>
         <View className="rounded-full ml-2" style={{ backgroundColor: SUBTLE_PILL_BG, padding: 4 }}>
-          <Text
-            variant="caption"
-            bold
-            tone="primary"
-            numberOfLines={1}
-            style={{
-              fontVariant: ['tabular-nums'],
-              fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
-            }}
-          >
-            {isRevealed ? 'Revealed' : countdownText}
-          </Text>
+          {isRevealed ? (
+            <Text
+              variant="caption"
+              bold
+              tone="primary"
+              numberOfLines={1}
+              style={{
+                fontVariant: ['tabular-nums'],
+                fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+              }}
+            >
+              Revealed
+            </Text>
+          ) : (
+            <CountdownPill revealEndsAt={post.discussionMeta?.revealEndsAt ?? null} />
+          )}
         </View>
       </View>
 
@@ -1431,11 +1451,9 @@ function ReplyComposer({
 
 /* ----- helpers (component-local) ----- */
 
-function formatCountdown(post: PostDetail | undefined, now: number): string {
-  if (!post || !post.discussionMeta?.revealEndsAt) {
-    return '00:00:00';
-  }
-  const endsAt = new Date(post.discussionMeta.revealEndsAt).getTime();
+function formatCountdown(revealEndsAt: string | null, now: number): string {
+  if (!revealEndsAt) return '00:00:00';
+  const endsAt = new Date(revealEndsAt).getTime();
   const remainingMs = Math.max(0, endsAt - now);
   if (remainingMs === 0) return '00:00:00';
 

@@ -48,7 +48,13 @@ export default function GroupDetailScreen() {
     staleTime: 30_000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
-    placeholderData: (prev) => prev,
+    // `prev` is whatever this query last held — including a DIFFERENT
+    // group's post list when navigating from group A's detail screen to
+    // group B's (same bug class as post/[id].tsx's postQuery: TanStack
+    // Query v5 hands the prior query's data across a key change here).
+    // Only reuse it when it's actually this group's posts.
+    placeholderData: (prev) =>
+      prev && prev.posts.every((p) => p.groupId === groupId) ? prev : undefined,
   });
 
   useRefreshOnFocus(['group', groupId]);

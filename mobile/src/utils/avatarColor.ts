@@ -1,10 +1,6 @@
-import { colors } from '../theme';
-
 /**
- * Light pastel badge backgrounds for initials avatars (used when there's
- * no profile image). Weighted so light orange shows up most often — the
- * duplicate 'lightOrange' entries below are the weighting mechanism, not
- * a mistake.
+ * Badge backgrounds for initials avatars (used when there's no profile
+ * image or member photo).
  */
 const LIGHT_PALETTE = [
   '#FFB020', // orange

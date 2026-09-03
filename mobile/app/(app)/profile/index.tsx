@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -6,6 +7,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Button, Text, useDialog } from '../../../src/components/ui';
 import { Fab } from '../../../src/components/Fab';
 import { AvatarWithCamera } from '../../../src/components/AvatarWithCamera';
+import { AvatarSourceSheet } from '../../../src/components/AvatarSourceSheet';
 import { getMe, getMyStats } from '../../../src/api/users.api';
 import { useAuth } from '../../../src/features/auth/hooks/useAuth';
 import { useAvatarUpload } from '../../../src/features/profile/useAvatarUpload';
@@ -83,18 +85,16 @@ export default function ProfileScreen() {
   const joinedAt =
     parsedCreatedAt && !Number.isNaN(parsedCreatedAt.getTime()) ? parsedCreatedAt : null;
 
-  const onChangeAvatar = () => {
-    pickAndUpload({
-      source: 'gallery',
-      onError: (msg) =>
-        dialog.show({
-          variant: 'danger',
-          title: 'Could not update photo',
-          message: msg,
-          actions: [{ label: 'OK' }],
-        }),
+  const onUploadError = (msg: string) =>
+    dialog.show({
+      variant: 'danger',
+      title: 'Could not update photo',
+      message: msg,
+      actions: [{ label: 'OK' }],
     });
-  };
+
+  const [avatarSourceOpen, setAvatarSourceOpen] = useState(false);
+  const onChangeAvatar = () => setAvatarSourceOpen(true);
 
   const onSignOut = async () => {
     // Revoke server-side before wiping local state — the refresh token is
@@ -250,6 +250,13 @@ export default function ProfileScreen() {
       </ScrollView>
 
       <Fab onPress={() => router.push('/(app)/create')} accessibilityLabel="Create post" />
+
+      <AvatarSourceSheet
+        visible={avatarSourceOpen}
+        onClose={() => setAvatarSourceOpen(false)}
+        onTakePhoto={() => pickAndUpload({ source: 'camera', onError: onUploadError })}
+        onChooseFromLibrary={() => pickAndUpload({ source: 'gallery', onError: onUploadError })}
+      />
     </SafeAreaView>
   );
 }

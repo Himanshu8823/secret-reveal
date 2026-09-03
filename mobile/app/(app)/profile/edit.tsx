@@ -232,6 +232,15 @@ export default function EditProfileScreen() {
             returnKeyType="next"
           />
 
+          {sessionUser?.phone ? (
+            <Input
+              label="Mobile number"
+              value={sessionUser.phone}
+              editable={false}
+              helperText="Mobile number cannot be changed"
+            />
+          ) : null}
+
           <View>
             <Input
               label="Username"

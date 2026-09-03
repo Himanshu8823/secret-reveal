@@ -63,20 +63,23 @@ export function useAvatarUpload() {
           }
         }
 
-        // Step 2 — launch the picker. We let the OS pick the picker UI
-        // (gallery grid / camera capture) so the UX is native on each
-        // platform. Quality is capped at 0.8 so we don't push 12-MP
-        // original photos through the network — server-side resize can
-        // happen later if we ever want a thumbnail.
-        const result = await ImagePicker.launchImageLibraryAsync({
+        // Step 2 — launch the picker. Quality is capped at 0.8 so we
+        // don't push 12-MP original photos through the network —
+        // server-side resize can happen later if we ever want a
+        // thumbnail.
+        const pickerOptions = {
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
           allowsEditing: true,
-          aspect: [1, 1],
+          aspect: [1, 1] as [number, number],
           quality: 0.8,
           // iOS: keep the EXIF orientation so portrait photos aren't
           // sideways. Android: same.
           exif: false,
-        });
+        };
+        const result =
+          source === 'camera'
+            ? await ImagePicker.launchCameraAsync(pickerOptions)
+            : await ImagePicker.launchImageLibraryAsync(pickerOptions);
 
         if (result.canceled) return null;
         const asset = result.assets[0];
