@@ -22,7 +22,36 @@ export function PublishOverlay({ phase }: { phase: PublishPhase }) {
   const visible = phase !== 'idle';
   const done = phase === 'published';
 
-  // Tick pops in when the phase flips to published.
+  // Card entrance: a soft scale + fade in on open, instead of the RN Modal's
+  // fade dropping a full-size card in place instantly — the sudden pop-in
+  // read as jarring/disturbing rather than a considered transition.
+  const cardScale = useRef(new Animated.Value(0.85)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      cardScale.setValue(0.85);
+      cardOpacity.setValue(0);
+      Animated.parallel([
+        Animated.spring(cardScale, {
+          toValue: 1,
+          friction: 8,
+          tension: 120,
+          useNativeDriver: true,
+        }),
+        Animated.timing(cardOpacity, {
+          toValue: 1,
+          duration: 180,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [visible, cardScale, cardOpacity]);
+
+  // Tick pops in when the phase flips to published — a slight overshoot
+  // (tension high, friction moderate) gives it a satisfying "landed" feel
+  // rather than just snapping to full size.
   const tickScale = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -66,41 +95,59 @@ export function PublishOverlay({ phase }: { phase: PublishPhase }) {
         className="flex-1 items-center justify-center px-10"
         style={{ backgroundColor: colors.surface.overlay }}
       >
-        <View
-          className="items-center bg-surface px-8 py-7"
-          style={{ borderRadius: radius.lg, minWidth: 220, ...elevation[2] }}
+        <Animated.View
+          className="items-center bg-surface px-9 py-9"
+          style={{
+            borderRadius: radius.lg,
+            minWidth: 240,
+            maxWidth: 300,
+            opacity: cardOpacity,
+            transform: [{ scale: cardScale }],
+            ...elevation[3],
+          }}
         >
-          {done ? (
-            <Animated.View style={{ transform: [{ scale: tickScale }] }}>
-              <Ionicons
-                name="checkmark-circle"
-                size={52}
-                color={colors.semantic.success}
+          <View
+            className="items-center justify-center"
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: radius.full,
+              backgroundColor: done ? colors.pill.successBg : colors.brand.primarySubtle,
+              marginBottom: 4,
+            }}
+          >
+            {done ? (
+              <Animated.View style={{ transform: [{ scale: tickScale }] }}>
+                <Ionicons
+                  name="checkmark-circle"
+                  size={40}
+                  color={colors.semantic.success}
+                />
+              </Animated.View>
+            ) : (
+              <Animated.View
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  borderWidth: 3,
+                  // One light segment on an otherwise faint ring reads as
+                  // motion without needing a spinner asset.
+                  borderColor: colors.border.DEFAULT,
+                  borderTopColor: colors.brand.primary,
+                  transform: [{ rotate }],
+                }}
               />
-            </Animated.View>
-          ) : (
-            <Animated.View
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                borderWidth: 3,
-                // One light segment on an otherwise faint ring reads as
-                // motion without needing a spinner asset.
-                borderColor: colors.border.DEFAULT,
-                borderTopColor: colors.brand.primary,
-                transform: [{ rotate }],
-              }}
-            />
-          )}
+            )}
+          </View>
 
-          <Text variant="bodyStrong" tone="primary" className="mt-4 text-center">
+          <Text variant="bodyStrong" tone="primary" className="mt-5 text-center">
             {done ? 'Published' : 'Publishing post…'}
           </Text>
-          <Text variant="caption" tone="secondary" className="mt-1 text-center">
+          <Text variant="caption" tone="secondary" className="mt-1.5 text-center">
             {done ? 'Your post is live' : 'Hang tight, this only takes a moment'}
           </Text>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
