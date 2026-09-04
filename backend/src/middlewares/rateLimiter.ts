@@ -59,24 +59,6 @@ export const refreshLimiter = makeLimiter({
   durationSeconds: TEN_MIN,
 });
 
-export const googleSignInLimiter = makeLimiter({
-  keyPrefix: 'rl:auth:google:ip',
-  points: 10,
-  durationSeconds: TEN_MIN,
-});
-
-export const phoneLinkRequestLimiter = makeLimiter({
-  keyPrefix: 'rl:auth:phonelink:req:user',
-  points: 3,
-  durationSeconds: TEN_MIN,
-});
-
-export const phoneLinkVerifyLimiter = makeLimiter({
-  keyPrefix: 'rl:auth:phonelink:verify:user',
-  points: 5,
-  durationSeconds: TEN_MIN,
-});
-
 // --- Posts ------------------------------------------------------------------
 
 export const postCreateLimiter = makeLimiter({

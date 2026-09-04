@@ -10,6 +10,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
 
+  // Must be DIFFERENT values. requireAuth verifies the access token with
+  // JWT_ACCESS_SECRET only, so identical secrets would let a refresh token
+  // pass as an access token. The cross-check is enforced by a .refine()
+  // below rather than trusted as a convention.
   JWT_ACCESS_SECRET: z.string().min(16, 'JWT_ACCESS_SECRET must be at least 16 chars'),
   JWT_REFRESH_SECRET: z.string().min(16, 'JWT_REFRESH_SECRET must be at least 16 chars'),
   JWT_ACCESS_TTL: z.string().default('15m'),
@@ -17,15 +21,6 @@ const envSchema = z.object({
 
   OTP_PROVIDER: z.enum(['mock']).default('mock'),
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
-
-  // Google Sign-In. The backend verifies ID tokens against these audiences
-  // (google-auth-library checks the token's `aud` claim is one of them).
-  // Optional so a fresh clone without Google configured still boots — the
-  // /auth/google route rejects with a clear error if none are set, rather
-  // than crashing at startup.
-  GOOGLE_IOS_CLIENT_ID: z.string().optional(),
-  GOOGLE_ANDROID_CLIENT_ID: z.string().optional(),
-  GOOGLE_WEB_CLIENT_ID: z.string().optional(),
 
   APP_NAME: z.string().min(1).default('Secretsuper'),
 
@@ -90,7 +85,16 @@ const envSchema = z.object({
     ),
 
   PROFILE_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
-});
+})
+  // Identical JWT secrets would collapse the access/refresh distinction:
+  // requireAuth would happily verify a refresh token as an access token,
+  // because the `type` claim only guards against this as a second line of
+  // defence. Refuse to boot instead of trusting the two .env values to
+  // differ by convention.
+  .refine((e) => e.JWT_ACCESS_SECRET !== e.JWT_REFRESH_SECRET, {
+    message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different values',
+    path: ['JWT_REFRESH_SECRET'],
+  });
 
 const parsed = envSchema.safeParse(process.env);
 

@@ -5,14 +5,9 @@ import {
   verifyOtpSchema,
   refreshSchema,
   logoutSchema,
-  googleSignInSchema,
-  requestPhoneLinkSchema,
-  verifyPhoneLinkSchema,
 } from './auth.validation.js';
 import { phoneInputSchema } from './phone.schema.js';
 import { rotateRefresh, revokeToken } from './token.service.js';
-import { signInWithGoogle } from './google.service.js';
-import { requestPhoneLinkOtp, verifyPhoneLinkOtp } from './phone-link.service.js';
 import { verifyRefreshToken } from '../../lib/jwt.js';
 import { logger } from '../../lib/logger.js';
 import { unregisterPushToken } from '../notifications/notifications.service.js';
@@ -138,62 +133,4 @@ export async function postLogout(req: Request, res: Response, _next: NextFunctio
     logger.error({ err }, 'logout: unexpected error in handler');
   }
   res.status(204).end();
-}
-
-/**
- * POST /auth/google
- *
- * Body: { idToken }. Verifies the Google ID token server-side, finds or
- * creates the user, and returns the same envelope shape as /auth/verify-otp
- * plus `needsPhone` so the client knows whether to route into phone-link
- * onboarding before (or instead of) the name/username welcome screen.
- */
-export async function postGoogleSignIn(req: Request, res: Response, next: NextFunction) {
-  try {
-    const { idToken } = googleSignInSchema.parse(req.body);
-    const result = await signInWithGoogle(idToken);
-    res.status(200).json({ success: true, data: result });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * POST /auth/phone/link/request
- *
- * Sends an OTP to attach a phone number to the CALLER's account (requires
- * requireAuth — see auth.routes.ts). Only meaningful for accounts that
- * don't already have a phone (Google-only signups); the service rejects
- * otherwise at the verify step.
- */
-export async function postRequestPhoneLink(req: Request, res: Response, next: NextFunction) {
-  try {
-    const body = requestPhoneLinkSchema.parse(req.body);
-    const { e164 } = phoneInputSchema.parse(body);
-    await requestPhoneLinkOtp(e164);
-    res.status(200).json({ success: true, data: { message: 'OTP sent' } });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * POST /auth/phone/link/verify
- *
- * Verifies the OTP and attaches the phone to req.user.id. Returns the
- * updated user so the client can refresh its stored session in place —
- * note this does NOT rotate the access/refresh token pair; the client's
- * existing tokens remain valid (only the `phone` claim inside the access
- * token becomes stale until the next refresh, which is harmless since
- * nothing server-side authorizes off the JWT's phone claim).
- */
-export async function postVerifyPhoneLink(req: Request, res: Response, next: NextFunction) {
-  try {
-    const body = verifyPhoneLinkSchema.parse(req.body);
-    const { e164 } = phoneInputSchema.parse(body);
-    const user = await verifyPhoneLinkOtp(req.user!.id, e164, body.otp);
-    res.status(200).json({ success: true, data: { user } });
-  } catch (err) {
-    next(err);
-  }
 }

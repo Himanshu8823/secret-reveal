@@ -6,7 +6,7 @@
  * or one of the four below.
  *
  *   sm   = 8   — chips, tag pills, secondary buttons inside cards
- *   md   = 12  — inputs, primary buttons (Send OTP, Google, Next)
+ *   md   = 12  — inputs, primary buttons (Send OTP, Next)
  *   lg   = 16  — cards, modals, bottom sheets, post cards, list cards
  *   full = ∞   — avatars, story rings, FAB, circular icon buttons
  */

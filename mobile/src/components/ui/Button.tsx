@@ -37,7 +37,7 @@ const sizeConfig: Record<ButtonSize, ButtonSizeConfig> = {
  *
  * Variants map to documented actions:
  *   - primary   : the main CTA on a screen (Send OTP, Next, Continue)
- *   - secondary : an action paired with a primary, or a "use Google instead"
+ *   - secondary : an action paired with a primary, or an alternative route
  *   - ghost     : text-only action inside a screen (Cancel, Learn more)
  *   - danger    : destructive action (Delete, Report, Reject)
  *

@@ -9,7 +9,7 @@
 export type GroupMemberSummary = {
   userId: string;
   name: string | null;
-  // Null for a Google-signup member who hasn't linked a phone yet.
+  // Nullable because the column is; OTP signup always sets it.
   phone: string | null;
   joinedAt: Date;
 };

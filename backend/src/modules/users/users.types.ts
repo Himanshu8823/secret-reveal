@@ -8,8 +8,8 @@
  */
 export type UserProfile = {
   id: string;
-  // Null for a Google-signup that hasn't completed phone-link onboarding
-  // yet (see modules/auth/phone-link.service.ts).
+  // Nullable because the column is (a leftover from the removed Google
+  // sign-in path); OTP signup always sets it.
   phone: string | null;
   name: string | null;
   username: string | null;

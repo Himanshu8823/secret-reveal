@@ -4,9 +4,9 @@ import { env } from '../config/env.js';
 
 export type AccessTokenPayload = {
   sub: string; // user id
-  // Null until the user completes phone onboarding (Google-only signups
-  // start without one). Present so downstream code never needs a DB round
-  // trip just to know whether the caller has a verified phone yet.
+  // Nullable because the column is (a leftover from the removed Google
+  // sign-in path); OTP signup always sets it. Present so downstream code
+  // never needs a DB round trip just to read the caller's phone.
   phone: string | null;
   type: 'access';
 };

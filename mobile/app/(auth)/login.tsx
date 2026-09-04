@@ -10,7 +10,6 @@ import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CountryPicker, type PickedCountry } from '../../src/components/CountryPicker';
 import { Button, Input, Text, useDialog } from '../../src/components/ui';
-import { GoogleIcon } from '../../src/components/GoogleIcon';
 import { colors, spacing } from '../../src/theme';
 import { APP_NAME } from '../../src/config/app';
 import { useAuth } from '../../src/features/auth/hooks/useAuth';
@@ -206,30 +205,6 @@ export default function LoginScreen() {
                 onPress={onSendOtp}
               />
             </View>
-
-            <View className="flex-row items-center my-5">
-              <View className="flex-1 h-px bg-border" />
-              <Text variant="caption" tone="secondary" className="mx-3">
-                or continue with
-              </Text>
-              <View className="flex-1 h-px bg-border" />
-            </View>
-
-            <Button
-              label="Sign in with Google"
-              variant="secondary"
-              size="lg"
-              fullWidth
-              leftSlot={<GoogleIcon size={20} />}
-              onPress={() =>
-                dialog.show({
-                  variant: 'info',
-                  title: 'Coming soon',
-                  message: 'Google sign-in is not available yet.',
-                  actions: [{ label: 'OK' }],
-                })
-              }
-            />
           </View>
 
           <View className="pt-4 pb-2">
