@@ -96,7 +96,17 @@ export default function ProfileScreen() {
   const [avatarSourceOpen, setAvatarSourceOpen] = useState(false);
   const onChangeAvatar = () => setAvatarSourceOpen(true);
 
+  // Deliberately never reset to false: sign-out always ends in a redirect to
+  // login, so the spinner should stay up until this screen is gone rather
+  // than blink back to an enabled button mid-teardown.
+  const [signingOut, setSigningOut] = useState(false);
+
   const onSignOut = async () => {
+    // The two network calls below can take a moment on a slow connection,
+    // and until they settle the screen looks unchanged — so guard against a
+    // second tap and show a spinner on the button for the whole duration.
+    if (signingOut) return;
+    setSigningOut(true);
     // Revoke server-side before wiping local state — the refresh token is
     // only readable from secure storage until clearAllAuthData() runs.
     // Both calls are best-effort: logout() always 204s per its own doc
@@ -245,7 +255,14 @@ export default function ProfileScreen() {
         {/* Sign out — sits below the scrollable content area, separated
             by a top divider so the destructive action is visually distinct. */}
         <View className="px-4 mt-10 pt-6 border-t border-border">
-          <Button label="Sign out" variant="danger" size="lg" onPress={onSignOut} />
+          <Button
+            label="Sign out"
+            variant="danger"
+            size="lg"
+            loading={signingOut}
+            disabled={signingOut}
+            onPress={onSignOut}
+          />
         </View>
       </ScrollView>
 
