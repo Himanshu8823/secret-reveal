@@ -1,6 +1,4 @@
 import { prisma } from '../../config/db.js';
-import { redis } from '../../config/redis.js';
-import { env } from '../../config/env.js';
 import { AppError, ErrorCode } from '../../lib/AppError.js';
 import { signAccessToken } from '../../lib/jwt.js';
 import { logger } from '../../lib/logger.js';
@@ -9,54 +7,48 @@ import { issueRefresh } from './token.service.js';
 import type { AuthUser, VerifyOtpResult } from './auth.types.js';
 import { getOtpProvider } from './otp.provider.js';
 
-const OTP_KEY_PREFIX = 'otp:';
-const otpKey = (phone: string) => `${OTP_KEY_PREFIX}${phone}`;
-
 /**
  * Request an OTP for a phone. Rate limits are applied at the route layer;
  * this function assumes it is being called within an allowed window.
  *
- * The OTP value is stored in Redis with an explicit TTL and never returned
- * to the client — even in mock mode, so the discipline is set now.
+ * The code itself is the provider's concern: on Twilio Verify it is minted,
+ * delivered, expired and validated entirely on Twilio's side and never
+ * enters this process. It is never returned to the client on any provider.
  */
 export async function requestOtp(phone: string): Promise<void> {
-  const provider = getOtpProvider();
-  const otp = provider.generateOtp();
-  await provider.sendOtp(phone, otp);
-  // SET with EX — explicit TTL, no key can live forever.
-  await redis.set(otpKey(phone), otp, 'EX', env.OTP_TTL_SECONDS);
+  await getOtpProvider().sendOtp(phone);
   // Lifecycle event — useful for ops dashboards ("are OTPs being requested?")
-  // and incident triage. Phone is masked; OTP is never logged.
+  // and incident triage. Phone is masked; the code is never logged.
   logger.info({ phone: maskPhone(phone) }, 'OTP requested');
 }
 
 /**
  * Verify an OTP, upsert the user, and issue tokens.
  *
- * The OTP key is deleted on the happy path BEFORE any DB work so that two
- * near-simultaneous verify calls can't both pass. The findUnique + create
- * pair is the new-vs-existing branch: from the client's perspective both
- * paths return the same response shape; only `isNewUser` differs.
+ * Single-use is the provider's guarantee, not ours: Twilio Verify deletes a
+ * verification the moment it is approved (and on expiry or max attempts), so
+ * a second verify with the same code lands on 'expired'. The mock provider
+ * consumes its own key for the same reason. That means two near-simultaneous
+ * verifies can't both reach the user-creation branch below.
  *
- * The verify limiter is enforced in the route; we also consume a point on
- * every call (success or failure) by relying on the route-level limiter.
+ * The findUnique + create pair is the new-vs-existing branch: from the
+ * client's perspective both paths return the same response shape; only
+ * `isNewUser` differs.
+ *
+ * Attempt limiting is enforced at the route layer (and again by Twilio's own
+ * per-verification cap on the twilio provider).
  */
 export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpResult> {
-  const stored = await redis.get(otpKey(phone));
+  const result = await getOtpProvider().checkOtp(phone, otp);
 
-  if (stored === null) {
+  if (result === 'expired') {
     throw new AppError(400, ErrorCode.OTP_EXPIRED, 'OTP expired, request again');
   }
-
-  if (stored !== otp) {
-    // Mismatch — the OTP key stays alive (user can retry until TTL or until
-    // the verify-attempt limiter locks them out).
+  if (result === 'incorrect') {
+    // The verification is still live — the user may retry until the
+    // provider's attempt cap or our own verify limiter locks them out.
     throw new AppError(401, ErrorCode.OTP_INCORRECT, 'Incorrect OTP');
   }
-
-  // Happy path: single-use. Delete the key BEFORE creating the user so a
-  // racing request can't pass the equality check above.
-  await redis.del(otpKey(phone));
 
   const existing = await prisma.user.findUnique({ where: { phone } });
   const isNewUser = existing === null;

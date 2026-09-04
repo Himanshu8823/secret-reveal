@@ -246,8 +246,10 @@ describe('POST /api/v1/auth/otp/request', () => {
     expect(res.body.data).toEqual({ message: 'OTP sent' });
     expect(JSON.stringify(res.body)).not.toContain('123456');
 
+    // Namespaced under the mock provider — only it stores a code locally.
+    // On the twilio provider the code never reaches our Redis at all.
     expect(mockRedis.set).toHaveBeenCalledWith(
-      'otp:+919876543210',
+      'otp:mock:+919876543210',
       '123456',
       'EX',
       300,
@@ -307,7 +309,7 @@ describe('POST /api/v1/auth/otp/verify', () => {
       user: { id: 'user-new', phone: '+919876543210' },
     });
 
-    expect(mockRedis.del).toHaveBeenCalledWith('otp:+919876543210');
+    expect(mockRedis.del).toHaveBeenCalledWith('otp:mock:+919876543210');
     expect(mockPrisma.user.create).toHaveBeenCalledWith({
       data: { phone: '+919876543210' },
     });

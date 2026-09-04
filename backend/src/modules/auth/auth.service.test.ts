@@ -13,13 +13,6 @@ vi.mock('../../config/db.js', () => ({
     },
   },
 }));
-vi.mock('../../config/redis.js', () => ({
-  redis: {
-    get: vi.fn(),
-    set: vi.fn(),
-    del: vi.fn(),
-  },
-}));
 vi.mock('../../config/env.js', () => ({
   env: {
     NODE_ENV: 'development',
@@ -35,8 +28,19 @@ vi.mock('../../lib/jwt.js', () => ({
   signRefreshToken: vi.fn(() => ({ token: 'refresh.mock', jti: 'jti-new' })),
 }));
 
+// The provider is the seam now: the auth service no longer knows how a code
+// is stored or checked, only whether the check approved. Mocking here keeps
+// these tests about the auth branching, not about Twilio or Redis.
+const sendOtpMock = vi.fn();
+const checkOtpMock = vi.fn();
+vi.mock('./otp.provider.js', () => ({
+  getOtpProvider: () => ({
+    sendOtp: (...a: unknown[]) => sendOtpMock(...a),
+    checkOtp: (...a: unknown[]) => checkOtpMock(...a),
+  }),
+}));
+
 import { prisma } from '../../config/db.js';
-import { redis } from '../../config/redis.js';
 import { requestOtp, verifyOtp } from './auth.service.js';
 import { AppError } from '../../lib/AppError.js';
 
@@ -46,54 +50,53 @@ const mockPrisma = prisma as unknown as {
     create: ReturnType<typeof vi.fn>;
   };
 };
-const mockRedis = redis as unknown as {
-  get: ReturnType<typeof vi.fn>;
-  set: ReturnType<typeof vi.fn>;
-  del: ReturnType<typeof vi.fn>;
-};
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 describe('requestOtp', () => {
-  it('stores the OTP in Redis with an explicit TTL and never returns it', async () => {
-    mockRedis.set.mockResolvedValue('OK');
+  it('delegates delivery to the provider and never returns a code', async () => {
+    sendOtpMock.mockResolvedValue(undefined);
 
-    await requestOtp('+919999999999');
+    const result = await requestOtp('+919999999999');
 
-    expect(mockRedis.set).toHaveBeenCalledWith('otp:+919999999999', '123456', 'EX', 300);
+    expect(sendOtpMock).toHaveBeenCalledWith('+919999999999');
+    expect(result).toBeUndefined();
+  });
+
+  it('propagates a provider send failure instead of reporting success', async () => {
+    sendOtpMock.mockRejectedValue(new AppError(502, 'INTERNAL', 'Could not send OTP, try again'));
+
+    await expect(requestOtp('+919999999999')).rejects.toMatchObject({ status: 502 });
   });
 });
 
 describe('verifyOtp', () => {
-  it('throws OTP_EXPIRED when the key is missing', async () => {
-    mockRedis.get.mockResolvedValue(null);
+  it('throws OTP_EXPIRED when the provider reports no live verification', async () => {
+    checkOtpMock.mockResolvedValue('expired');
 
     await expect(verifyOtp('+919999999999', '123456')).rejects.toMatchObject({
       status: 400,
       code: 'OTP_EXPIRED',
     } satisfies Partial<AppError>);
 
-    expect(mockRedis.del).not.toHaveBeenCalled();
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
   });
 
-  it('throws OTP_INCORRECT on mismatch and does not delete the key', async () => {
-    mockRedis.get.mockResolvedValue('000000');
+  it('throws OTP_INCORRECT on a wrong code without touching the DB', async () => {
+    checkOtpMock.mockResolvedValue('incorrect');
 
     await expect(verifyOtp('+919999999999', '123456')).rejects.toMatchObject({
       status: 401,
       code: 'OTP_INCORRECT',
     } satisfies Partial<AppError>);
 
-    expect(mockRedis.del).not.toHaveBeenCalled();
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
   });
 
   it('creates a new user on first login (isNewUser=true)', async () => {
-    mockRedis.get.mockResolvedValue('123456');
-    mockRedis.del.mockResolvedValue(1);
+    checkOtpMock.mockResolvedValue('approved');
     mockPrisma.user.findUnique.mockResolvedValue(null);
     mockPrisma.user.create.mockResolvedValue({
       id: 'user-1',
@@ -105,7 +108,7 @@ describe('verifyOtp', () => {
 
     const result = await verifyOtp('+919999999999', '123456');
 
-    expect(mockRedis.del).toHaveBeenCalledWith('otp:+919999999999');
+    expect(checkOtpMock).toHaveBeenCalledWith('+919999999999', '123456');
     expect(mockPrisma.user.create).toHaveBeenCalledWith({ data: { phone: '+919999999999' } });
     expect(result.isNewUser).toBe(true);
     expect(result.accessToken).toBe('access.mock');
@@ -116,8 +119,7 @@ describe('verifyOtp', () => {
   });
 
   it('logs in an existing user without creating a row (isNewUser=false)', async () => {
-    mockRedis.get.mockResolvedValue('123456');
-    mockRedis.del.mockResolvedValue(1);
+    checkOtpMock.mockResolvedValue('approved');
     mockPrisma.user.findUnique.mockResolvedValue({
       id: 'user-1',
       phone: '+919999999999',
@@ -133,15 +135,11 @@ describe('verifyOtp', () => {
     expect(result.user.name).toBe('Test');
   });
 
-  it('enforces single-use: the key is deleted before DB work', async () => {
-    // If two requests both pass the equality check, the second's `del` will
-    // already have happened and the next `get` returns null. We simulate
-    // that ordering to assert the sequence is `del` -> `findUnique`.
+  it('checks the code before any DB work, so a spent code never creates a user', async () => {
     const callOrder: string[] = [];
-    mockRedis.get.mockResolvedValue('123456');
-    mockRedis.del.mockImplementation(async () => {
-      callOrder.push('del');
-      return 1;
+    checkOtpMock.mockImplementation(async () => {
+      callOrder.push('checkOtp');
+      return 'approved';
     });
     mockPrisma.user.findUnique.mockImplementation(async () => {
       callOrder.push('findUnique');
@@ -156,6 +154,6 @@ describe('verifyOtp', () => {
 
     await verifyOtp('+919999999999', '123456');
 
-    expect(callOrder).toEqual(['del', 'findUnique']);
+    expect(callOrder).toEqual(['checkOtp', 'findUnique']);
   });
 });

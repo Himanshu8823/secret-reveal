@@ -3,6 +3,18 @@ import { z } from 'zod';
 
 // Refuse to start if required secrets are missing — fail loud, not confusing later.
 // Optional values fall back to dev defaults; production deployment must override them.
+
+/**
+ * An optional credential that may also be present-but-blank in .env.
+ * `.optional()` alone only covers an absent key; `KEY=` parses as "" and
+ * would satisfy a naive `.optional()` while being useless at runtime.
+ */
+const emptyAsUndefined = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v) => (v === undefined || v === '' ? undefined : v));
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -19,8 +31,20 @@ const envSchema = z.object({
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('30d'),
 
-  OTP_PROVIDER: z.enum(['mock']).default('mock'),
+  OTP_PROVIDER: z.enum(['mock', 'twilio']).default('mock'),
+  // Only governs the mock provider's own key TTL. Twilio Verify owns the
+  // real expiry (~10 min) and ignores this.
   OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+
+  // Twilio Verify. Required only when OTP_PROVIDER=twilio — enforced by a
+  // .refine() below so a production deploy can't start with the OTP path
+  // half-configured and fail at the first login instead.
+  // `KEY=` (present but blank, the shape .env.example ships) must read the
+  // same as an absent key, so normalize "" to undefined rather than letting
+  // an empty credential reach the Twilio client.
+  TWILIO_ACCOUNT_SID: emptyAsUndefined,
+  TWILIO_AUTH_TOKEN: emptyAsUndefined,
+  TWILIO_VERIFY_SERVICE_SID: emptyAsUndefined,
 
   APP_NAME: z.string().min(1).default('Secretsuper'),
 
@@ -94,7 +118,26 @@ const envSchema = z.object({
   .refine((e) => e.JWT_ACCESS_SECRET !== e.JWT_REFRESH_SECRET, {
     message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different values',
     path: ['JWT_REFRESH_SECRET'],
-  });
+  })
+  // The mock provider delivers no SMS and accepts a fixed code, so outside
+  // development it would mean "anyone can sign in as anyone". NODE_ENV
+  // itself defaults to 'development', so a deploy that forgets to set it
+  // would otherwise land on exactly that. Refuse to boot instead.
+  .refine((e) => e.NODE_ENV === 'development' || e.NODE_ENV === 'test' || e.OTP_PROVIDER !== 'mock', {
+    message:
+      'OTP_PROVIDER=mock is development-only — set OTP_PROVIDER=twilio (and its credentials) for staging/production',
+    path: ['OTP_PROVIDER'],
+  })
+  .refine(
+    (e) =>
+      e.OTP_PROVIDER !== 'twilio' ||
+      Boolean(e.TWILIO_ACCOUNT_SID && e.TWILIO_AUTH_TOKEN && e.TWILIO_VERIFY_SERVICE_SID),
+    {
+      message:
+        'OTP_PROVIDER=twilio requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_VERIFY_SERVICE_SID',
+      path: ['TWILIO_VERIFY_SERVICE_SID'],
+    },
+  );
 
 const parsed = envSchema.safeParse(process.env);
 
